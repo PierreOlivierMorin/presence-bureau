@@ -1,5 +1,10 @@
 import { PrismaClient } from "@prisma/client";
 
+// Nettoyer les guillemets résiduels si collés par erreur dans le dashboard Vercel
+if (process.env.DATABASE_URL) {
+  process.env.DATABASE_URL = process.env.DATABASE_URL.replace(/^["']|["']$/g, "").trim();
+}
+
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 
 export const prisma =

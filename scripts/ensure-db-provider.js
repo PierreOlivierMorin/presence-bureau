@@ -16,7 +16,7 @@ const envPath = path.join(__dirname, "..", ".env");
 
 function getDatabaseUrl() {
   if (process.env.DATABASE_URL) {
-    return process.env.DATABASE_URL;
+    return process.env.DATABASE_URL.replace(/^["']|["']$/g, "").trim();
   }
 
   if (fs.existsSync(envPath)) {
