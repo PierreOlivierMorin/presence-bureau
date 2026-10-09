@@ -14,11 +14,11 @@
     "db:use:sqlite": "node scripts/ensure-db-provider.js sqlite && prisma generate",
     "db:use:postgres": "node scripts/ensure-db-provider.js postgresql && prisma generate",
     "db:push": "prisma db push",
-    "db:seed": "tsx prisma/seed.ts",
+    "db:seed": "tsx --env-file=.env prisma/seed.ts",
     "db:studio": "prisma studio"
   },
   "prisma": {
-    "seed": "tsx prisma/seed.ts"
+    "seed": "tsx --env-file=.env prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.4.1",
