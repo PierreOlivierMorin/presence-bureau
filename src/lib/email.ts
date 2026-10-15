@@ -33,6 +33,72 @@ function getAppBaseUrl(): string {
 }
 
 /**
+ * Envoi d'un courriel via Resend avec gestion détaillée des erreurs et support HTML
+ */
+async function sendViaResend({
+  to,
+  subject,
+  textContent,
+  htmlContent,
+}: {
+  to: string;
+  subject: string;
+  textContent: string;
+  htmlContent?: string;
+}): Promise<SendEmailResult | null> {
+  const resendApiKey = process.env.RESEND_API_KEY;
+  if (!resendApiKey) {
+    if (process.env.NODE_ENV === "production") {
+      console.warn(
+        "[Service Courriel] ATTENTION : Variable RESEND_API_KEY absente. Le courriel ne sera pas expédié en production (simulation active)."
+      );
+    }
+    return null;
+  }
+
+  try {
+    const fromEmail = process.env.EMAIL_FROM || "onboarding@resend.dev";
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${resendApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: `Présence Bureau <${fromEmail}>`,
+        to: [to],
+        subject,
+        text: textContent,
+        ...(htmlContent ? { html: htmlContent } : {}),
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      return { success: true, simulated: false, messageId: data.id };
+    }
+
+    const errorDetails = await res.text();
+    console.error(
+      `[Email Resend Error] Échec d'envoi vers "${to}" (HTTP ${res.status}) :`,
+      errorDetails
+    );
+    return {
+      success: false,
+      simulated: false,
+      error: `Échec d'envoi Resend (HTTP ${res.status}) : ${errorDetails}`,
+    };
+  } catch (e) {
+    console.error("[Email Resend Network Error]", e);
+    return {
+      success: false,
+      simulated: false,
+      error: e instanceof Error ? e.message : "Erreur de connexion au service de courriel.",
+    };
+  }
+}
+
+/**
  * Envoi d'un courriel de vérification d'adresse
  */
 export async function sendVerificationEmail({
@@ -60,40 +126,60 @@ export async function sendVerificationEmail({
   });
 
   const subject = "Vérifiez votre adresse courriel - Présence Bureau";
-  const textContent = `Bonjour ${firstName || ""},\n\n` +
+  const nameGreeting = firstName ? `Bonjour ${firstName}` : "Bonjour";
+
+  const textContent = `${nameGreeting},\n\n` +
     `Votre code de vérification pour Présence Bureau est : ${code}\n\n` +
     `Ou cliquez directement sur ce lien pour valider votre compte :\n${verifyLink}\n\n` +
     `Ce lien et ce code expirent dans 24 heures.`;
 
-  // Vérification de la présence d'une clé Resend
-  const resendApiKey = process.env.RESEND_API_KEY;
-  if (resendApiKey) {
-    try {
-      const fromEmail = process.env.EMAIL_FROM || "onboarding@resend.dev";
-      const res = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${resendApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from: `Présence Bureau <${fromEmail}>`,
-          to: [normalizedEmail],
-          subject,
-          text: textContent,
-        }),
-      });
+  const htmlContent = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; color: #1e293b;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="color: #2563eb; font-size: 24px; margin: 0;">📅 Présence Bureau</h1>
+        <p style="color: #64748b; font-size: 14px; margin-top: 4px;">Vérification de sécurité</p>
+      </div>
+      <p style="font-size: 15px; line-height: 1.5; color: #334155;">${nameGreeting},</p>
+      <p style="font-size: 15px; line-height: 1.5; color: #334155;">
+        Pour activer votre compte et accéder à votre calendrier d'équipe, saisissez ce code à 6 chiffres :
+      </p>
+      <div style="text-align: center; margin: 24px 0;">
+        <span style="display: inline-block; font-size: 32px; font-weight: bold; letter-spacing: 6px; padding: 12px 28px; background-color: #f1f5f9; border-radius: 8px; border: 1px solid #cbd5e1; color: #0f172a; font-family: monospace;">
+          ${code}
+        </span>
+      </div>
+      <p style="font-size: 15px; line-height: 1.5; color: #334155;">
+        Ou validez votre adresse en un clic :
+      </p>
+      <div style="text-align: center; margin: 24px 0;">
+        <a href="${verifyLink}" style="display: inline-block; padding: 12px 24px; background-color: #2563eb; color: #ffffff; text-decoration: none; font-weight: 600; border-radius: 8px; font-size: 15px;">
+          Valider mon compte
+        </a>
+      </div>
+      <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+      <p style="font-size: 12px; color: #94a3b8; line-height: 1.4;">
+        Ce code et ce lien sont valides pendant 24 heures.<br />
+        Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer ce courriel en toute sécurité.
+      </p>
+    </div>
+  `;
 
-      if (res.ok) {
-        const data = await res.json();
-        return { success: true, simulated: false, messageId: data.id };
-      }
-    } catch (e) {
-      console.error("[Email Resend Error]", e);
-    }
+  const resendResult = await sendViaResend({
+    to: normalizedEmail,
+    subject,
+    textContent,
+    htmlContent,
+  });
+
+  if (resendResult) {
+    return {
+      ...resendResult,
+      code,
+      previewUrl: verifyLink,
+    };
   }
 
-  // Simulation locale par défaut
+  // Simulation locale si aucune clé Resend n'est fournie
   console.log("\n==================== [SIMULATION COURRIEL] ====================");
   console.log(`✉️  DESTINATAIRE : ${normalizedEmail}`);
   console.log(`📌 SUJET        : ${subject}`);
@@ -142,31 +228,41 @@ export async function sendInvitationEmail({
     `Pour finaliser la création de votre compte sécurisé, cliquez sur ce lien :\n${inviteLink}\n\n` +
     `Cette invitation est valable pendant 7 jours.`;
 
-  const resendApiKey = process.env.RESEND_API_KEY;
-  if (resendApiKey) {
-    try {
-      const fromEmail = process.env.EMAIL_FROM || "onboarding@resend.dev";
-      const res = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${resendApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from: `Présence Bureau <${fromEmail}>`,
-          to: [normalizedEmail],
-          subject,
-          text: textContent,
-        }),
-      });
+  const htmlContent = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; color: #1e293b;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="color: #2563eb; font-size: 24px; margin: 0;">📅 Présence Bureau</h1>
+        <p style="color: #64748b; font-size: 14px; margin-top: 4px;">Invitation à collaborer</p>
+      </div>
+      <p style="font-size: 15px; line-height: 1.5; color: #334155;">Bonjour,</p>
+      <p style="font-size: 15px; line-height: 1.5; color: #334155;">
+        <strong>${inviterName}</strong> vous invite à rejoindre l'équipe <strong>« ${teamName} »</strong> sur Présence Bureau en tant que <strong>${roleLabel}</strong>.
+      </p>
+      <div style="text-align: center; margin: 28px 0;">
+        <a href="${inviteLink}" style="display: inline-block; padding: 12px 28px; background-color: #2563eb; color: #ffffff; text-decoration: none; font-weight: 600; border-radius: 8px; font-size: 15px;">
+          Accepter l'invitation et créer mon compte
+        </a>
+      </div>
+      <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+      <p style="font-size: 12px; color: #94a3b8; line-height: 1.4;">
+        Cette invitation est valable pendant 7 jours.<br />
+        Si vous n'attendiez pas cette invitation, vous pouvez ignorer ce message.
+      </p>
+    </div>
+  `;
 
-      if (res.ok) {
-        const data = await res.json();
-        return { success: true, simulated: false, messageId: data.id };
-      }
-    } catch (e) {
-      console.error("[Email Resend Error]", e);
-    }
+  const resendResult = await sendViaResend({
+    to: normalizedEmail,
+    subject,
+    textContent,
+    htmlContent,
+  });
+
+  if (resendResult) {
+    return {
+      ...resendResult,
+      previewUrl: inviteLink,
+    };
   }
 
   // Simulation locale
@@ -212,38 +308,58 @@ export async function sendPasswordResetEmail({
     timestamp: Date.now(),
   });
 
+  const nameGreeting = firstName ? `Bonjour ${firstName}` : "Bonjour";
   const subject = "Réinitialisation de votre mot de passe - Présence Bureau";
-  const textContent = `Bonjour ${firstName || ""},\n\n` +
+  const textContent = `${nameGreeting},\n\n` +
     `Une demande de réinitialisation de mot de passe a été initiée pour votre compte.\n\n` +
     `Votre code de réinitialisation est : ${code}\n\n` +
     `Ou cliquez sur le lien suivant pour choisir un nouveau mot de passe :\n${resetLink}\n\n` +
     `Ce lien est valable 1 heure. Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer ce message en toute sécurité.`;
 
-  const resendApiKey = process.env.RESEND_API_KEY;
-  if (resendApiKey) {
-    try {
-      const fromEmail = process.env.EMAIL_FROM || "onboarding@resend.dev";
-      const res = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${resendApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from: `Présence Bureau <${fromEmail}>`,
-          to: [normalizedEmail],
-          subject,
-          text: textContent,
-        }),
-      });
+  const htmlContent = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; color: #1e293b;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="color: #2563eb; font-size: 24px; margin: 0;">📅 Présence Bureau</h1>
+        <p style="color: #64748b; font-size: 14px; margin-top: 4px;">Réinitialisation de mot de passe</p>
+      </div>
+      <p style="font-size: 15px; line-height: 1.5; color: #334155;">${nameGreeting},</p>
+      <p style="font-size: 15px; line-height: 1.5; color: #334155;">
+        Une demande de réinitialisation de mot de passe a été initiée pour votre compte. Saisissez ce code de vérification :
+      </p>
+      <div style="text-align: center; margin: 24px 0;">
+        <span style="display: inline-block; font-size: 32px; font-weight: bold; letter-spacing: 6px; padding: 12px 28px; background-color: #f1f5f9; border-radius: 8px; border: 1px solid #cbd5e1; color: #0f172a; font-family: monospace;">
+          ${code}
+        </span>
+      </div>
+      <p style="font-size: 15px; line-height: 1.5; color: #334155;">
+        Ou définissez un nouveau mot de passe directement via ce bouton :
+      </p>
+      <div style="text-align: center; margin: 24px 0;">
+        <a href="${resetLink}" style="display: inline-block; padding: 12px 24px; background-color: #2563eb; color: #ffffff; text-decoration: none; font-weight: 600; border-radius: 8px; font-size: 15px;">
+          Changer mon mot de passe
+        </a>
+      </div>
+      <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+      <p style="font-size: 12px; color: #94a3b8; line-height: 1.4;">
+        Ce code et ce lien sont valables pendant 1 heure.<br />
+        Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer ce courriel en toute sécurité.
+      </p>
+    </div>
+  `;
 
-      if (res.ok) {
-        const data = await res.json();
-        return { success: true, simulated: false, messageId: data.id };
-      }
-    } catch (e) {
-      console.error("[Email Resend Error]", e);
-    }
+  const resendResult = await sendViaResend({
+    to: normalizedEmail,
+    subject,
+    textContent,
+    htmlContent,
+  });
+
+  if (resendResult) {
+    return {
+      ...resendResult,
+      code,
+      previewUrl: resetLink,
+    };
   }
 
   // Simulation locale
