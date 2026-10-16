@@ -6,29 +6,37 @@ const prisma = new PrismaClient();
 async function main() {
   console.log("🌱 Début du seed...");
 
-  // Nettoyage préalable (ordre cascade)
-  await prisma.presence.deleteMany({});
-  await prisma.user.deleteMany({});
-  await prisma.team.deleteMany({});
-
-  // 1. Création des équipes
-  const teamAlpha = await prisma.team.create({
-    data: { name: "Équipe Alpha" },
+  // 1. Création ou mise à jour des équipes
+  const teamAlpha = await prisma.team.upsert({
+    where: { name: "Équipe Alpha" },
+    update: {},
+    create: { name: "Équipe Alpha" },
   });
 
-  const teamBeta = await prisma.team.create({
-    data: { name: "Équipe Beta" },
+  const teamBeta = await prisma.team.upsert({
+    where: { name: "Équipe Beta" },
+    update: {},
+    create: { name: "Équipe Beta" },
   });
 
-  console.log(`✅ Équipes créées : ${teamAlpha.name}, ${teamBeta.name}`);
+  console.log(`✅ Équipes prêtes : ${teamAlpha.name}, ${teamBeta.name}`);
 
   // 2. Hash du mot de passe
   const adminPassword = await bcrypt.hash("Admin123!", 10);
   const userPassword = await bcrypt.hash("User123!", 10);
 
-  // 3. Création des utilisateurs initiaux (les 3 collègues du projet original)
-  const elisabeth = await prisma.user.create({
-    data: {
+  // 3. Création ou mise à jour des utilisateurs initiaux
+  const elisabeth = await prisma.user.upsert({
+    where: { email: "admin@bureau.local" },
+    update: {
+      firstName: "Élisabeth",
+      lastName: "Sirois",
+      passwordHash: adminPassword,
+      role: Role.ADMIN,
+      emailVerified: true,
+      teamId: teamAlpha.id,
+    },
+    create: {
       email: "admin@bureau.local",
       firstName: "Élisabeth",
       lastName: "Sirois",
@@ -39,8 +47,17 @@ async function main() {
     },
   });
 
-  const frederique = await prisma.user.create({
-    data: {
+  const frederique = await prisma.user.upsert({
+    where: { email: "frederique@bureau.local" },
+    update: {
+      firstName: "Frédérique",
+      lastName: "Bonenfant",
+      passwordHash: userPassword,
+      role: Role.USER,
+      emailVerified: true,
+      teamId: teamAlpha.id,
+    },
+    create: {
       email: "frederique@bureau.local",
       firstName: "Frédérique",
       lastName: "Bonenfant",
@@ -51,8 +68,17 @@ async function main() {
     },
   });
 
-  const allyne = await prisma.user.create({
-    data: {
+  const allyne = await prisma.user.upsert({
+    where: { email: "allyne@bureau.local" },
+    update: {
+      firstName: "Allyne",
+      lastName: "Fernandes",
+      passwordHash: userPassword,
+      role: Role.USER,
+      emailVerified: true,
+      teamId: teamAlpha.id,
+    },
+    create: {
       email: "allyne@bureau.local",
       firstName: "Allyne",
       lastName: "Fernandes",
@@ -63,9 +89,17 @@ async function main() {
     },
   });
 
-  // Utilisateur dans l'autre équipe pour tester le cloisonnement
-  const marc = await prisma.user.create({
-    data: {
+  const marc = await prisma.user.upsert({
+    where: { email: "marc@bureau.local" },
+    update: {
+      firstName: "Marc",
+      lastName: "Tremblay",
+      passwordHash: userPassword,
+      role: Role.USER,
+      emailVerified: true,
+      teamId: teamBeta.id,
+    },
+    create: {
       email: "marc@bureau.local",
       firstName: "Marc",
       lastName: "Tremblay",
@@ -76,7 +110,7 @@ async function main() {
     },
   });
 
-  console.log("✅ Utilisateurs créés :");
+  console.log("✅ Utilisateurs prêts :");
   console.log(` - ${elisabeth.firstName} ${elisabeth.lastName} (ADMIN, ${teamAlpha.name})`);
   console.log(` - ${frederique.firstName} ${frederique.lastName} (USER, ${teamAlpha.name})`);
   console.log(` - ${allyne.firstName} ${allyne.lastName} (USER, ${teamAlpha.name})`);
@@ -89,8 +123,18 @@ async function main() {
   const day = String(today.getDate()).padStart(2, "0");
   const todayKey = `${year}-${month}-${day}`;
 
-  await prisma.presence.create({
-    data: {
+  await prisma.presence.upsert({
+    where: {
+      date_userId: {
+        date: todayKey,
+        userId: elisabeth.id,
+      },
+    },
+    update: {
+      amStatus: PresenceStatus.OFFICE,
+      pmStatus: PresenceStatus.OFFICE,
+    },
+    create: {
       date: todayKey,
       userId: elisabeth.id,
       amStatus: PresenceStatus.OFFICE,
@@ -98,8 +142,18 @@ async function main() {
     },
   });
 
-  await prisma.presence.create({
-    data: {
+  await prisma.presence.upsert({
+    where: {
+      date_userId: {
+        date: todayKey,
+        userId: frederique.id,
+      },
+    },
+    update: {
+      amStatus: PresenceStatus.REMOTE,
+      pmStatus: PresenceStatus.OFFICE,
+    },
+    create: {
       date: todayKey,
       userId: frederique.id,
       amStatus: PresenceStatus.REMOTE,
@@ -107,8 +161,18 @@ async function main() {
     },
   });
 
-  await prisma.presence.create({
-    data: {
+  await prisma.presence.upsert({
+    where: {
+      date_userId: {
+        date: todayKey,
+        userId: allyne.id,
+      },
+    },
+    update: {
+      amStatus: PresenceStatus.OFFICE,
+      pmStatus: PresenceStatus.REMOTE,
+    },
+    create: {
       date: todayKey,
       userId: allyne.id,
       amStatus: PresenceStatus.OFFICE,
@@ -116,7 +180,7 @@ async function main() {
     },
   });
 
-  console.log(`✅ Présences de test insérées pour la date ${todayKey}`);
+  console.log(`✅ Présences de test synchronisées pour la date ${todayKey}`);
   console.log("🎉 Seed terminé avec succès !");
 }
 
