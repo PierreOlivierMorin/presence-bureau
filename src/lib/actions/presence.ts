@@ -1,6 +1,6 @@
 "use server";
 
-import { prisma } from "@/lib/db";
+import { prisma, ensurePresenceDinerColumn } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 
@@ -13,6 +13,7 @@ const CYCLE: Record<string, "NONE" | "OFFICE" | "REMOTE" | "ABSENT"> = {
 
 export async function togglePresenceAction(date: string, period: "am" | "diner" | "pm") {
   const session = await requireAuth();
+  await ensurePresenceDinerColumn();
 
   const existing = await prisma.presence.findUnique({
     where: {
@@ -78,6 +79,7 @@ export async function setDayPresenceAction(
   period: "all" | "am" | "diner" | "pm" = "all"
 ) {
   const session = await requireAuth();
+  await ensurePresenceDinerColumn();
 
   const existing = await prisma.presence.findUnique({
     where: {
@@ -158,6 +160,7 @@ export async function batchSetPresencesAction(
   }[]
 ) {
   const session = await requireAuth();
+  await ensurePresenceDinerColumn();
 
   for (const entry of entries) {
     const dinerStatus = entry.dinerStatus ?? entry.amStatus;
@@ -204,6 +207,8 @@ export async function getMonthPresencesAction(year: number, month: number, targe
     return { teamMembers: [], presences: [] };
   }
 
+  await ensurePresenceDinerColumn();
+
   const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
   const lastDay = new Date(year, month, 0).getDate();
   const endDate = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
@@ -214,24 +219,47 @@ export async function getMonthPresencesAction(year: number, month: number, targe
     orderBy: { firstName: "asc" },
   });
 
-  const presences = await prisma.presence.findMany({
-    where: {
-      date: {
-        gte: startDate,
-        lte: endDate,
+  try {
+    const presences = await prisma.presence.findMany({
+      where: {
+        date: {
+          gte: startDate,
+          lte: endDate,
+        },
+        user: {
+          teamId: effectiveTeamId,
+        },
       },
-      user: {
-        teamId: effectiveTeamId,
+      select: {
+        date: true,
+        userId: true,
+        amStatus: true,
+        dinerStatus: true,
+        pmStatus: true,
       },
-    },
-    select: {
-      date: true,
-      userId: true,
-      amStatus: true,
-      dinerStatus: true,
-      pmStatus: true,
-    },
-  });
-
-  return { teamMembers, presences };
+    });
+    return { teamMembers, presences };
+  } catch {
+    const legacyPresences = await prisma.presence.findMany({
+      where: {
+        date: {
+          gte: startDate,
+          lte: endDate,
+        },
+        user: {
+          teamId: effectiveTeamId,
+        },
+      },
+      select: {
+        date: true,
+        userId: true,
+        amStatus: true,
+        pmStatus: true,
+      },
+    });
+    return {
+      teamMembers,
+      presences: legacyPresences.map((p) => ({ ...p, dinerStatus: "NONE" as const })),
+    };
+  }
 }

@@ -1,5 +1,5 @@
 import { requireAuth } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { prisma, ensurePresenceDinerColumn } from "@/lib/db";
 import MobileReservationView from "@/components/Calendar/MobileReservationView";
 import Link from "next/link";
 import { Users, Shield } from "lucide-react";
@@ -48,19 +48,40 @@ export default async function MobilePage() {
     const lastDay = new Date(year, month, 0).getDate();
     const endDate = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
 
-    initialPresences = await prisma.presence.findMany({
-      where: {
-        date: { gte: startDate, lte: endDate },
-        user: { teamId: activeTeamId },
-      },
-      select: {
-        date: true,
-        userId: true,
-        amStatus: true,
-        dinerStatus: true,
-        pmStatus: true,
-      },
-    });
+    await ensurePresenceDinerColumn();
+
+    try {
+      initialPresences = await prisma.presence.findMany({
+        where: {
+          date: { gte: startDate, lte: endDate },
+          user: { teamId: activeTeamId },
+        },
+        select: {
+          date: true,
+          userId: true,
+          amStatus: true,
+          dinerStatus: true,
+          pmStatus: true,
+        },
+      });
+    } catch {
+      const legacyPresences = await prisma.presence.findMany({
+        where: {
+          date: { gte: startDate, lte: endDate },
+          user: { teamId: activeTeamId },
+        },
+        select: {
+          date: true,
+          userId: true,
+          amStatus: true,
+          pmStatus: true,
+        },
+      });
+      initialPresences = legacyPresences.map((p) => ({
+        ...p,
+        dinerStatus: "NONE",
+      }));
+    }
   }
 
   if (!activeTeamId) {

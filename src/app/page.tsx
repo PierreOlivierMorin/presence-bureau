@@ -1,5 +1,5 @@
 import { requireAuth } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { prisma, ensurePresenceDinerColumn } from "@/lib/db";
 import Navbar from "@/components/Navbar";
 import CalendarView from "@/components/Calendar/CalendarView";
 import Link from "next/link";
@@ -56,19 +56,40 @@ export default async function HomePage() {
         lastDay
       ).padStart(2, "0")}`;
 
-      initialPresences = await prisma.presence.findMany({
-        where: {
-          date: { gte: startDate, lte: endDate },
-          user: { teamId: activeTeamId },
-        },
-        select: {
-          date: true,
-          userId: true,
-          amStatus: true,
-          dinerStatus: true,
-          pmStatus: true,
-        },
-      });
+      await ensurePresenceDinerColumn();
+
+      try {
+        initialPresences = await prisma.presence.findMany({
+          where: {
+            date: { gte: startDate, lte: endDate },
+            user: { teamId: activeTeamId },
+          },
+          select: {
+            date: true,
+            userId: true,
+            amStatus: true,
+            dinerStatus: true,
+            pmStatus: true,
+          },
+        });
+      } catch {
+        const legacyPresences = await prisma.presence.findMany({
+          where: {
+            date: { gte: startDate, lte: endDate },
+            user: { teamId: activeTeamId },
+          },
+          select: {
+            date: true,
+            userId: true,
+            amStatus: true,
+            pmStatus: true,
+          },
+        });
+        initialPresences = legacyPresences.map((p) => ({
+          ...p,
+          dinerStatus: "NONE",
+        }));
+      }
     }
 
     return (
