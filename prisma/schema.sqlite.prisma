@@ -49,8 +49,9 @@ model User {
 model Presence {
   id        String         @id @default(cuid())
   date      String         // Format: YYYY-MM-DD
-  amStatus  PresenceStatus @default(NONE)
-  pmStatus  PresenceStatus @default(NONE)
+  amStatus    PresenceStatus @default(NONE)
+  dinerStatus PresenceStatus @default(NONE)
+  pmStatus    PresenceStatus @default(NONE)
   userId    String
   user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   updatedAt DateTime       @updatedAt

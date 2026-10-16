@@ -11,7 +11,7 @@ const CYCLE: Record<string, "NONE" | "OFFICE" | "REMOTE" | "ABSENT"> = {
   ABSENT: "NONE",
 };
 
-export async function togglePresenceAction(date: string, period: "am" | "pm") {
+export async function togglePresenceAction(date: string, period: "am" | "diner" | "pm") {
   const session = await requireAuth();
 
   const existing = await prisma.presence.findUnique({
@@ -24,19 +24,27 @@ export async function togglePresenceAction(date: string, period: "am" | "pm") {
   });
 
   const currentAm = existing?.amStatus || "NONE";
+  const currentDiner = existing?.dinerStatus || "NONE";
   const currentPm = existing?.pmStatus || "NONE";
 
   const nextAm = period === "am" ? CYCLE[currentAm] : currentAm;
+  const nextDiner = period === "diner" ? CYCLE[currentDiner] : currentDiner;
   const nextPm = period === "pm" ? CYCLE[currentPm] : currentPm;
 
-  if (nextAm === "NONE" && nextPm === "NONE") {
+  if (nextAm === "NONE" && nextDiner === "NONE" && nextPm === "NONE") {
     if (existing) {
       await prisma.presence.delete({
         where: { id: existing.id },
       });
     }
     revalidatePath("/");
-    return { date, userId: session.id, amStatus: "NONE", pmStatus: "NONE" };
+    return {
+      date,
+      userId: session.id,
+      amStatus: "NONE",
+      dinerStatus: "NONE",
+      pmStatus: "NONE",
+    };
   }
 
   const updated = await prisma.presence.upsert({
@@ -48,12 +56,14 @@ export async function togglePresenceAction(date: string, period: "am" | "pm") {
     },
     update: {
       amStatus: nextAm,
+      dinerStatus: nextDiner,
       pmStatus: nextPm,
     },
     create: {
       date,
       userId: session.id,
       amStatus: nextAm,
+      dinerStatus: nextDiner,
       pmStatus: nextPm,
     },
   });
@@ -65,7 +75,7 @@ export async function togglePresenceAction(date: string, period: "am" | "pm") {
 export async function setDayPresenceAction(
   date: string,
   status: "NONE" | "OFFICE" | "REMOTE" | "ABSENT",
-  period: "all" | "am" | "pm" = "all"
+  period: "all" | "am" | "diner" | "pm" = "all"
 ) {
   const session = await requireAuth();
 
@@ -79,28 +89,39 @@ export async function setDayPresenceAction(
   });
 
   const currentAm = existing?.amStatus || "NONE";
+  const currentDiner = existing?.dinerStatus || "NONE";
   const currentPm = existing?.pmStatus || "NONE";
 
   let nextAm = currentAm;
+  let nextDiner = currentDiner;
   let nextPm = currentPm;
 
   if (period === "all") {
     nextAm = status;
+    nextDiner = status;
     nextPm = status;
   } else if (period === "am") {
     nextAm = status;
+  } else if (period === "diner") {
+    nextDiner = status;
   } else if (period === "pm") {
     nextPm = status;
   }
 
-  if (nextAm === "NONE" && nextPm === "NONE") {
+  if (nextAm === "NONE" && nextDiner === "NONE" && nextPm === "NONE") {
     if (existing) {
       await prisma.presence.delete({
         where: { id: existing.id },
       });
     }
     revalidatePath("/");
-    return { date, userId: session.id, amStatus: "NONE", pmStatus: "NONE" };
+    return {
+      date,
+      userId: session.id,
+      amStatus: "NONE",
+      dinerStatus: "NONE",
+      pmStatus: "NONE",
+    };
   }
 
   const updated = await prisma.presence.upsert({
@@ -112,12 +133,14 @@ export async function setDayPresenceAction(
     },
     update: {
       amStatus: nextAm,
+      dinerStatus: nextDiner,
       pmStatus: nextPm,
     },
     create: {
       date,
       userId: session.id,
       amStatus: nextAm,
+      dinerStatus: nextDiner,
       pmStatus: nextPm,
     },
   });
@@ -130,13 +153,15 @@ export async function batchSetPresencesAction(
   entries: {
     date: string;
     amStatus: "NONE" | "OFFICE" | "REMOTE" | "ABSENT";
+    dinerStatus?: "NONE" | "OFFICE" | "REMOTE" | "ABSENT";
     pmStatus: "NONE" | "OFFICE" | "REMOTE" | "ABSENT";
   }[]
 ) {
   const session = await requireAuth();
 
   for (const entry of entries) {
-    if (entry.amStatus === "NONE" && entry.pmStatus === "NONE") {
+    const dinerStatus = entry.dinerStatus ?? entry.amStatus;
+    if (entry.amStatus === "NONE" && dinerStatus === "NONE" && entry.pmStatus === "NONE") {
       await prisma.presence.deleteMany({
         where: {
           date: entry.date,
@@ -153,12 +178,14 @@ export async function batchSetPresencesAction(
         },
         update: {
           amStatus: entry.amStatus,
+          dinerStatus,
           pmStatus: entry.pmStatus,
         },
         create: {
           date: entry.date,
           userId: session.id,
           amStatus: entry.amStatus,
+          dinerStatus,
           pmStatus: entry.pmStatus,
         },
       });
@@ -201,6 +228,7 @@ export async function getMonthPresencesAction(year: number, month: number, targe
       date: true,
       userId: true,
       amStatus: true,
+      dinerStatus: true,
       pmStatus: true,
     },
   });

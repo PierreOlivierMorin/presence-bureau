@@ -31,6 +31,7 @@ export default async function HomePage() {
       date: string;
       userId: string;
       amStatus: string;
+      dinerStatus: string;
       pmStatus: string;
     }[] = [];
 
@@ -64,6 +65,7 @@ export default async function HomePage() {
           date: true,
           userId: true,
           amStatus: true,
+          dinerStatus: true,
           pmStatus: true,
         },
       });

@@ -6,9 +6,11 @@ export interface TeamMember {
   lastName: string;
 }
 
+export type PeriodDisplay = "all" | "am" | "diner" | "pm" | "am+diner" | "diner+pm" | "am+pm";
+
 export interface DayPresenceItem {
   member: TeamMember;
-  period: "all" | "am" | "pm";
+  period: PeriodDisplay;
 }
 
 export interface DayPresenceBreakdown {
@@ -117,10 +119,30 @@ export function getWeekDays(
   return days;
 }
 
+function getStatusPeriod(
+  am: StatusType,
+  diner: StatusType,
+  pm: StatusType,
+  target: StatusType
+): PeriodDisplay | null {
+  const hasAm = am === target;
+  const hasDiner = diner === target;
+  const hasPm = pm === target;
+
+  if (hasAm && hasDiner && hasPm) return "all";
+  if (hasAm && hasDiner && !hasPm) return "am+diner";
+  if (!hasAm && hasDiner && hasPm) return "diner+pm";
+  if (hasAm && !hasDiner && hasPm) return "am+pm";
+  if (hasAm) return "am";
+  if (hasDiner) return "diner";
+  if (hasPm) return "pm";
+  return null;
+}
+
 /** Calcule la répartition des présences pour une date donnée */
 export function getDayPresenceBreakdown(
   teamMembers: TeamMember[],
-  presencesMap: Record<string, Record<string, { am: StatusType; pm: StatusType }>>,
+  presencesMap: Record<string, Record<string, { am: StatusType; diner?: StatusType; pm: StatusType }>>,
   dateKey: string
 ): DayPresenceBreakdown {
   const atOffice: DayPresenceItem[] = [];
@@ -132,29 +154,21 @@ export function getDayPresenceBreakdown(
     const entry = presencesMap[dateKey]?.[m.id];
     const am = entry?.am || "NONE";
     const pm = entry?.pm || "NONE";
+    const diner = entry?.diner !== undefined ? entry.diner : am === pm ? am : "NONE";
 
-    if (am === "NONE" && pm === "NONE") {
+    if (am === "NONE" && diner === "NONE" && pm === "NONE") {
       notSet.push(m);
-    } else if (am === "OFFICE" && pm === "OFFICE") {
-      atOffice.push({ member: m, period: "all" });
-    } else if (am === "OFFICE" && pm !== "OFFICE") {
-      atOffice.push({ member: m, period: "am" });
-      if (pm === "REMOTE") atRemote.push({ member: m, period: "pm" });
-      else if (pm === "ABSENT") atAbsent.push({ member: m, period: "pm" });
-    } else if (pm === "OFFICE" && am !== "OFFICE") {
-      atOffice.push({ member: m, period: "pm" });
-      if (am === "REMOTE") atRemote.push({ member: m, period: "am" });
-      else if (am === "ABSENT") atAbsent.push({ member: m, period: "am" });
-    } else if (am === "REMOTE" && pm === "REMOTE") {
-      atRemote.push({ member: m, period: "all" });
-    } else if (am === "ABSENT" && pm === "ABSENT") {
-      atAbsent.push({ member: m, period: "all" });
-    } else {
-      if (am === "REMOTE") atRemote.push({ member: m, period: "am" });
-      if (pm === "REMOTE") atRemote.push({ member: m, period: "pm" });
-      if (am === "ABSENT") atAbsent.push({ member: m, period: "am" });
-      if (pm === "ABSENT") atAbsent.push({ member: m, period: "pm" });
+      continue;
     }
+
+    const officePeriod = getStatusPeriod(am, diner, pm, "OFFICE");
+    if (officePeriod) atOffice.push({ member: m, period: officePeriod });
+
+    const remotePeriod = getStatusPeriod(am, diner, pm, "REMOTE");
+    if (remotePeriod) atRemote.push({ member: m, period: remotePeriod });
+
+    const absentPeriod = getStatusPeriod(am, diner, pm, "ABSENT");
+    if (absentPeriod) atAbsent.push({ member: m, period: absentPeriod });
   }
 
   return { atOffice, atRemote, atAbsent, notSet };

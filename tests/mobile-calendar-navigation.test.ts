@@ -275,6 +275,28 @@ describe("Mobile Calendar Navigation & Row Expansion Unit Tests", () => {
       assert.ok(names.includes("Allyne"));
       assert.ok(names.includes("Marc"));
     });
+
+    test("correctly identifies diner slot presence and combinations (AM, Dîner, PM)", () => {
+      const presencesMap: Record<
+        string,
+        Record<string, { am: StatusType; diner?: StatusType; pm: StatusType }>
+      > = {
+        "2026-09-23": {
+          u1: { am: "NONE", diner: "OFFICE", pm: "NONE" },
+          u2: { am: "OFFICE", diner: "OFFICE", pm: "REMOTE" },
+          u3: { am: "REMOTE", diner: "OFFICE", pm: "OFFICE" },
+          u4: { am: "OFFICE", diner: "OFFICE", pm: "OFFICE" },
+        },
+      };
+
+      const breakdown = getDayPresenceBreakdown(mockMembers, presencesMap, "2026-09-23");
+
+      assert.equal(breakdown.atOffice.length, 4);
+      assert.equal(breakdown.atOffice.find((o) => o.member.id === "u1")?.period, "diner");
+      assert.equal(breakdown.atOffice.find((o) => o.member.id === "u2")?.period, "am+diner");
+      assert.equal(breakdown.atOffice.find((o) => o.member.id === "u3")?.period, "diner+pm");
+      assert.equal(breakdown.atOffice.find((o) => o.member.id === "u4")?.period, "all");
+    });
   });
 
   describe("toggleRowExpansion (Week View Row Expand/Collapse)", () => {

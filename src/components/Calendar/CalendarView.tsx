@@ -18,6 +18,7 @@ export interface PresenceRecord {
   date: string;
   userId: string;
   amStatus: string;
+  dinerStatus?: string;
   pmStatus: string;
 }
 
@@ -57,13 +58,14 @@ export default function CalendarView({
   );
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>(initialMembers);
   const [presencesMap, setPresencesMap] = useState<
-    Record<string, Record<string, { am: StatusType; pm: StatusType }>>
+    Record<string, Record<string, { am: StatusType; diner: StatusType; pm: StatusType }>>
   >(() => {
-    const map: Record<string, Record<string, { am: StatusType; pm: StatusType }>> = {};
+    const map: Record<string, Record<string, { am: StatusType; diner: StatusType; pm: StatusType }>> = {};
     for (const p of initialPresences) {
       if (!map[p.date]) map[p.date] = {};
       map[p.date][p.userId] = {
         am: (p.amStatus as StatusType) || "NONE",
+        diner: (p.dinerStatus as StatusType) || "NONE",
         pm: (p.pmStatus as StatusType) || "NONE",
       };
     }
@@ -109,11 +111,12 @@ export default function CalendarView({
       );
 
       setTeamMembers(res.teamMembers);
-      const newMap: Record<string, Record<string, { am: StatusType; pm: StatusType }>> = {};
+      const newMap: Record<string, Record<string, { am: StatusType; diner: StatusType; pm: StatusType }>> = {};
       for (const p of res.presences) {
         if (!newMap[p.date]) newMap[p.date] = {};
         newMap[p.date][p.userId] = {
           am: (p.amStatus as StatusType) || "NONE",
+          diner: (p.dinerStatus as StatusType) || "NONE",
           pm: (p.pmStatus as StatusType) || "NONE",
         };
       }
@@ -168,10 +171,14 @@ export default function CalendarView({
     loadMonthData(currentDate, newTeamId);
   };
 
-  // Bascule optimiste de statut AM/PM pour l'utilisateur connecté
-  const handleToggleSlot = async (dateKey: string, period: "am" | "pm") => {
+  // Bascule optimiste de statut AM/Dîner/PM pour l'utilisateur connecté
+  const handleToggleSlot = async (dateKey: string, period: "am" | "diner" | "pm") => {
     // Statut actuel
-    const userPresence = presencesMap[dateKey]?.[currentUser.id] || { am: "NONE", pm: "NONE" };
+    const userPresence = presencesMap[dateKey]?.[currentUser.id] || {
+      am: "NONE",
+      diner: "NONE",
+      pm: "NONE",
+    };
     const currentStatus = userPresence[period] || "NONE";
     const nextIndex = (STATUS_CYCLE.indexOf(currentStatus) + 1) % STATUS_CYCLE.length;
     const nextStatus = STATUS_CYCLE[nextIndex];
@@ -179,11 +186,16 @@ export default function CalendarView({
     // Mise à jour optimiste
     setPresencesMap((prev) => {
       const copy = { ...prev };
+      const existingDay = copy[dateKey]?.[currentUser.id] || {
+        am: "NONE" as StatusType,
+        diner: "NONE" as StatusType,
+        pm: "NONE" as StatusType,
+      };
       if (!copy[dateKey]) copy[dateKey] = {};
       copy[dateKey] = {
         ...copy[dateKey],
         [currentUser.id]: {
-          ...copy[dateKey][currentUser.id],
+          ...existingDay,
           [period]: nextStatus,
         },
       };
@@ -197,11 +209,16 @@ export default function CalendarView({
       // Annulation en cas d'erreur
       setPresencesMap((prev) => {
         const copy = { ...prev };
+        const existingDay = copy[dateKey]?.[currentUser.id] || {
+          am: "NONE" as StatusType,
+          diner: "NONE" as StatusType,
+          pm: "NONE" as StatusType,
+        };
         if (!copy[dateKey]) copy[dateKey] = {};
         copy[dateKey] = {
           ...copy[dateKey],
           [currentUser.id]: {
-            ...copy[dateKey][currentUser.id],
+            ...existingDay,
             [period]: currentStatus,
           },
         };
@@ -271,7 +288,7 @@ export default function CalendarView({
           <span>Absent</span>
         </div>
         <div className="text-[var(--muted)] italic text-xs">
-          💡 Cliquez sur AM ou PM sur votre ligne pour basculer votre présence
+          💡 Cliquez sur AM, Dîner ou PM sur votre ligne pour basculer votre présence
         </div>
       </div>
 
@@ -355,8 +372,13 @@ export default function CalendarView({
           const isToday = isThisMonth && today.getDate() === dayNum;
 
           // Statuts de l'utilisateur connecté
-          const userDay = presencesMap[dateKey]?.[currentUser.id] || { am: "NONE", pm: "NONE" };
+          const userDay = presencesMap[dateKey]?.[currentUser.id] || {
+            am: "NONE",
+            diner: "NONE",
+            pm: "NONE",
+          };
           const amInfo = STATUS_DETAILS[userDay.am || "NONE"];
+          const dinerInfo = STATUS_DETAILS[userDay.diner || "NONE"];
           const pmInfo = STATUS_DETAILS[userDay.pm || "NONE"];
 
           return (
@@ -384,17 +406,29 @@ export default function CalendarView({
                 )}
               </div>
 
-              {/* Boutons AM / PM de l'utilisateur connecté */}
-              <div className="grid grid-cols-2 gap-1">
+              {/* Boutons AM / Dîner / PM de l'utilisateur connecté */}
+              <div className="grid grid-cols-3 gap-1">
                 <button
                   type="button"
                   onClick={() => handleToggleSlot(dateKey, "am")}
                   title="Avant-midi : cliquer pour changer"
-                  className={`py-1 px-1 rounded text-center text-[10.5px] font-semibold border border-[var(--border)] leading-tight transition ${amInfo.className}`}
+                  className={`py-1 px-0.5 rounded text-center text-[10px] font-semibold border border-[var(--border)] leading-tight transition ${amInfo.className}`}
                 >
                   AM
-                  <span className="block text-[9.5px] font-normal truncate">
+                  <span className="block text-[9px] font-normal truncate">
                     {amInfo.label}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleToggleSlot(dateKey, "diner")}
+                  title="Dîner : cliquer pour changer"
+                  className={`py-1 px-0.5 rounded text-center text-[10px] font-semibold border border-[var(--border)] leading-tight transition ${dinerInfo.className}`}
+                >
+                  Dîner
+                  <span className="block text-[9px] font-normal truncate">
+                    {dinerInfo.label}
                   </span>
                 </button>
 
@@ -402,10 +436,10 @@ export default function CalendarView({
                   type="button"
                   onClick={() => handleToggleSlot(dateKey, "pm")}
                   title="Après-midi : cliquer pour changer"
-                  className={`py-1 px-1 rounded text-center text-[10.5px] font-semibold border border-[var(--border)] leading-tight transition ${pmInfo.className}`}
+                  className={`py-1 px-0.5 rounded text-center text-[10px] font-semibold border border-[var(--border)] leading-tight transition ${pmInfo.className}`}
                 >
                   PM
-                  <span className="block text-[9.5px] font-normal truncate">
+                  <span className="block text-[9px] font-normal truncate">
                     {pmInfo.label}
                   </span>
                 </button>
@@ -413,7 +447,12 @@ export default function CalendarView({
 
               {/* Section Collègues de l'équipe */}
               <div className="flex flex-col gap-1 mt-1 pt-1.5 border-t border-dashed border-[var(--border)] flex-1">
-                {(["am", "pm"] as const).map((period) => {
+                {(["am", "diner", "pm"] as const).map((period) => {
+                  const periodLabels: Record<"am" | "diner" | "pm", string> = {
+                    am: "AM",
+                    diner: "DÎNER",
+                    pm: "PM",
+                  };
                   const periodEntries = teamMembers.filter((m) => {
                     if (m.id === currentUser.id) return false;
                     const st = presencesMap[dateKey]?.[m.id]?.[period];
@@ -423,7 +462,7 @@ export default function CalendarView({
                   return (
                     <div key={period} className="flex flex-col gap-0.5">
                       <span className="text-[9px] font-bold text-[var(--muted)] uppercase tracking-wider">
-                        {period.toUpperCase()}
+                        {periodLabels[period]}
                       </span>
                       <div className="flex flex-col gap-1">
                         {periodEntries.length > 0 ? (

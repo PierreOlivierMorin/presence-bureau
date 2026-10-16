@@ -132,12 +132,14 @@ async function main() {
     },
     update: {
       amStatus: PresenceStatus.OFFICE,
+      dinerStatus: PresenceStatus.OFFICE,
       pmStatus: PresenceStatus.OFFICE,
     },
     create: {
       date: todayKey,
       userId: elisabeth.id,
       amStatus: PresenceStatus.OFFICE,
+      dinerStatus: PresenceStatus.OFFICE,
       pmStatus: PresenceStatus.OFFICE,
     },
   });
@@ -151,12 +153,14 @@ async function main() {
     },
     update: {
       amStatus: PresenceStatus.REMOTE,
+      dinerStatus: PresenceStatus.OFFICE,
       pmStatus: PresenceStatus.OFFICE,
     },
     create: {
       date: todayKey,
       userId: frederique.id,
       amStatus: PresenceStatus.REMOTE,
+      dinerStatus: PresenceStatus.OFFICE,
       pmStatus: PresenceStatus.OFFICE,
     },
   });
@@ -170,12 +174,14 @@ async function main() {
     },
     update: {
       amStatus: PresenceStatus.OFFICE,
+      dinerStatus: PresenceStatus.OFFICE,
       pmStatus: PresenceStatus.REMOTE,
     },
     create: {
       date: todayKey,
       userId: allyne.id,
       amStatus: PresenceStatus.OFFICE,
+      dinerStatus: PresenceStatus.OFFICE,
       pmStatus: PresenceStatus.REMOTE,
     },
   });

@@ -46,6 +46,7 @@ export interface PresenceRecord {
   date: string;
   userId: string;
   amStatus: string;
+  dinerStatus?: string;
   pmStatus: string;
 }
 
@@ -61,6 +62,46 @@ interface MobileReservationViewProps {
 }
 
 type TabType = "schedule" | "team" | "templates" | "options";
+
+type PeriodDisplay = "all" | "am" | "diner" | "pm" | "am+diner" | "diner+pm" | "am+pm";
+
+function formatPeriodShort(period: PeriodDisplay): string {
+  switch (period) {
+    case "all":
+      return "Journée complète";
+    case "am":
+      return "AM";
+    case "diner":
+      return "Dîner";
+    case "pm":
+      return "PM";
+    case "am+diner":
+      return "AM + Dîner";
+    case "diner+pm":
+      return "Dîner + PM";
+    case "am+pm":
+      return "AM + PM";
+  }
+}
+
+function formatPeriodLong(period: PeriodDisplay): string {
+  switch (period) {
+    case "all":
+      return "Toute la journée";
+    case "am":
+      return "Matin (AM)";
+    case "diner":
+      return "Dîner";
+    case "pm":
+      return "Après-midi (PM)";
+    case "am+diner":
+      return "Matin & Dîner";
+    case "diner+pm":
+      return "Dîner & Après-midi";
+    case "am+pm":
+      return "Matin & Après-midi";
+  }
+}
 
 const STATUS_CONFIG: Record<
   StatusType,
@@ -138,13 +179,14 @@ export default function MobileReservationView({
 
   // Presences map
   const [presencesMap, setPresencesMap] = useState<
-    Record<string, Record<string, { am: StatusType; pm: StatusType }>>
+    Record<string, Record<string, { am: StatusType; diner: StatusType; pm: StatusType }>>
   >(() => {
-    const map: Record<string, Record<string, { am: StatusType; pm: StatusType }>> = {};
+    const map: Record<string, Record<string, { am: StatusType; diner: StatusType; pm: StatusType }>> = {};
     for (const p of initialPresences) {
       if (!map[p.date]) map[p.date] = {};
       map[p.date][p.userId] = {
         am: (p.amStatus as StatusType) || "NONE",
+        diner: (p.dinerStatus as StatusType) || "NONE",
         pm: (p.pmStatus as StatusType) || "NONE",
       };
     }
@@ -192,11 +234,12 @@ export default function MobileReservationView({
       );
 
       setTeamMembers(res.teamMembers);
-      const newMap: Record<string, Record<string, { am: StatusType; pm: StatusType }>> = {};
+      const newMap: Record<string, Record<string, { am: StatusType; diner: StatusType; pm: StatusType }>> = {};
       for (const p of res.presences) {
         if (!newMap[p.date]) newMap[p.date] = {};
         newMap[p.date][p.userId] = {
           am: (p.amStatus as StatusType) || "NONE",
+          diner: (p.dinerStatus as StatusType) || "NONE",
           pm: (p.pmStatus as StatusType) || "NONE",
         };
       }
@@ -416,23 +459,32 @@ export default function MobileReservationView({
   const handleSetDayStatus = async (
     dateKey: string,
     status: StatusType,
-    period: "all" | "am" | "pm" = "all"
+    period: "all" | "am" | "diner" | "pm" = "all"
   ) => {
-    const prevEntry = presencesMap[dateKey]?.[currentUser.id] || { am: "NONE", pm: "NONE" };
+    const prevEntry = presencesMap[dateKey]?.[currentUser.id] || {
+      am: "NONE",
+      diner: "NONE",
+      pm: "NONE",
+    };
 
     let newAm = prevEntry.am;
+    let newDiner = prevEntry.diner;
     let newPm = prevEntry.pm;
 
     if (period === "all") {
-      if (prevEntry.am === status && prevEntry.pm === status) {
+      if (prevEntry.am === status && prevEntry.diner === status && prevEntry.pm === status) {
         newAm = "NONE";
+        newDiner = "NONE";
         newPm = "NONE";
       } else {
         newAm = status;
+        newDiner = status;
         newPm = status;
       }
     } else if (period === "am") {
       newAm = prevEntry.am === status ? "NONE" : status;
+    } else if (period === "diner") {
+      newDiner = prevEntry.diner === status ? "NONE" : status;
     } else if (period === "pm") {
       newPm = prevEntry.pm === status ? "NONE" : status;
     }
@@ -442,7 +494,7 @@ export default function MobileReservationView({
       ...prev,
       [dateKey]: {
         ...(prev[dateKey] || {}),
-        [currentUser.id]: { am: newAm, pm: newPm },
+        [currentUser.id]: { am: newAm, diner: newDiner, pm: newPm },
       },
     }));
 
@@ -454,7 +506,8 @@ export default function MobileReservationView({
       if (period === "all") {
         await setDayPresenceAction(dateKey, newAm, "all");
       } else {
-        await setDayPresenceAction(dateKey, period === "am" ? newAm : newPm, period);
+        const nextVal = period === "am" ? newAm : period === "diner" ? newDiner : newPm;
+        await setDayPresenceAction(dateKey, nextVal, period);
       }
     } catch {
       setPresencesMap((prev) => ({
@@ -477,6 +530,7 @@ export default function MobileReservationView({
     const updates: {
       date: string;
       amStatus: StatusType;
+      dinerStatus: StatusType;
       pmStatus: StatusType;
     }[] = [];
 
@@ -498,6 +552,7 @@ export default function MobileReservationView({
       updates.push({
         date: day.dateKey,
         amStatus: st,
+        dinerStatus: st,
         pmStatus: st,
       });
     });
@@ -506,7 +561,11 @@ export default function MobileReservationView({
       const copy = { ...prev };
       for (const u of updates) {
         if (!copy[u.date]) copy[u.date] = {};
-        copy[u.date][currentUser.id] = { am: u.amStatus, pm: u.pmStatus };
+        copy[u.date][currentUser.id] = {
+          am: u.amStatus,
+          diner: u.dinerStatus,
+          pm: u.pmStatus,
+        };
       }
       return copy;
     });
@@ -524,38 +583,49 @@ export default function MobileReservationView({
   // Analyse des présences d'un jour pour l'équipe
   const getDayPresenceBreakdown = useCallback(
     (dateKey: string) => {
-      const atOffice: { member: TeamMember; period: "all" | "am" | "pm" }[] = [];
-      const atRemote: { member: TeamMember; period: "all" | "am" | "pm" }[] = [];
-      const atAbsent: { member: TeamMember; period: "all" | "am" | "pm" }[] = [];
+      const atOffice: { member: TeamMember; period: PeriodDisplay }[] = [];
+      const atRemote: { member: TeamMember; period: PeriodDisplay }[] = [];
+      const atAbsent: { member: TeamMember; period: PeriodDisplay }[] = [];
       const notSet: TeamMember[] = [];
+
+      const getStatusPeriod = (
+        am: StatusType,
+        diner: StatusType,
+        pm: StatusType,
+        target: StatusType
+      ): PeriodDisplay | null => {
+        const hasAm = am === target;
+        const hasDiner = diner === target;
+        const hasPm = pm === target;
+        if (hasAm && hasDiner && hasPm) return "all";
+        if (hasAm && hasDiner && !hasPm) return "am+diner";
+        if (!hasAm && hasDiner && hasPm) return "diner+pm";
+        if (hasAm && !hasDiner && hasPm) return "am+pm";
+        if (hasAm) return "am";
+        if (hasDiner) return "diner";
+        if (hasPm) return "pm";
+        return null;
+      };
 
       for (const m of teamMembers) {
         const entry = presencesMap[dateKey]?.[m.id];
         const am = entry?.am || "NONE";
+        const diner = entry?.diner || "NONE";
         const pm = entry?.pm || "NONE";
 
-        if (am === "NONE" && pm === "NONE") {
+        if (am === "NONE" && diner === "NONE" && pm === "NONE") {
           notSet.push(m);
-        } else if (am === "OFFICE" && pm === "OFFICE") {
-          atOffice.push({ member: m, period: "all" });
-        } else if (am === "OFFICE" && pm !== "OFFICE") {
-          atOffice.push({ member: m, period: "am" });
-          if (pm === "REMOTE") atRemote.push({ member: m, period: "pm" });
-          else if (pm === "ABSENT") atAbsent.push({ member: m, period: "pm" });
-        } else if (pm === "OFFICE" && am !== "OFFICE") {
-          atOffice.push({ member: m, period: "pm" });
-          if (am === "REMOTE") atRemote.push({ member: m, period: "am" });
-          else if (am === "ABSENT") atAbsent.push({ member: m, period: "am" });
-        } else if (am === "REMOTE" && pm === "REMOTE") {
-          atRemote.push({ member: m, period: "all" });
-        } else if (am === "ABSENT" && pm === "ABSENT") {
-          atAbsent.push({ member: m, period: "all" });
-        } else {
-          if (am === "REMOTE") atRemote.push({ member: m, period: "am" });
-          if (pm === "REMOTE") atRemote.push({ member: m, period: "pm" });
-          if (am === "ABSENT") atAbsent.push({ member: m, period: "am" });
-          if (pm === "ABSENT") atAbsent.push({ member: m, period: "pm" });
+          continue;
         }
+
+        const officePeriod = getStatusPeriod(am, diner, pm, "OFFICE");
+        if (officePeriod) atOffice.push({ member: m, period: officePeriod });
+
+        const remotePeriod = getStatusPeriod(am, diner, pm, "REMOTE");
+        if (remotePeriod) atRemote.push({ member: m, period: remotePeriod });
+
+        const absentPeriod = getStatusPeriod(am, diner, pm, "ABSENT");
+        if (absentPeriod) atAbsent.push({ member: m, period: absentPeriod });
       }
 
       return { atOffice, atRemote, atAbsent, notSet };
@@ -571,17 +641,29 @@ export default function MobileReservationView({
 
   const selectedUserDay = presencesMap[selectedDateKey]?.[currentUser.id] || {
     am: "NONE",
+    diner: "NONE",
     pm: "NONE",
   };
 
-  const isFullOffice = selectedUserDay.am === "OFFICE" && selectedUserDay.pm === "OFFICE";
-  const isFullRemote = selectedUserDay.am === "REMOTE" && selectedUserDay.pm === "REMOTE";
-  const isFullAbsent = selectedUserDay.am === "ABSENT" && selectedUserDay.pm === "ABSENT";
+  const isFullOffice =
+    selectedUserDay.am === "OFFICE" &&
+    selectedUserDay.diner === "OFFICE" &&
+    selectedUserDay.pm === "OFFICE";
+  const isFullRemote =
+    selectedUserDay.am === "REMOTE" &&
+    selectedUserDay.diner === "REMOTE" &&
+    selectedUserDay.pm === "REMOTE";
+  const isFullAbsent =
+    selectedUserDay.am === "ABSENT" &&
+    selectedUserDay.diner === "ABSENT" &&
+    selectedUserDay.pm === "ABSENT";
   const isMixed =
     !isFullOffice &&
     !isFullRemote &&
     !isFullAbsent &&
-    (selectedUserDay.am !== "NONE" || selectedUserDay.pm !== "NONE");
+    (selectedUserDay.am !== "NONE" ||
+      selectedUserDay.diner !== "NONE" ||
+      selectedUserDay.pm !== "NONE");
 
   // Filtre d'équipe pour l'onglet Équipe
   const filteredTeamBreakdown = useMemo(() => {
@@ -737,11 +819,21 @@ export default function MobileReservationView({
             className="flex-1 flex gap-1.5 overflow-x-auto py-1 px-0.5 scrollbar-none snap-x"
           >
             {weekDays.map((day) => {
-              const uDay = presencesMap[day.dateKey]?.[currentUser.id] || { am: "NONE", pm: "NONE" };
+              const uDay = presencesMap[day.dateKey]?.[currentUser.id] || {
+                am: "NONE",
+                diner: "NONE",
+                pm: "NONE",
+              };
               const b = getDayPresenceBreakdown(day.dateKey);
-              const hasOffice = uDay.am === "OFFICE" || uDay.pm === "OFFICE";
-              const hasRemote = !hasOffice && (uDay.am === "REMOTE" || uDay.pm === "REMOTE");
-              const hasAbsent = !hasOffice && !hasRemote && (uDay.am === "ABSENT" || uDay.pm === "ABSENT");
+              const hasOffice =
+                uDay.am === "OFFICE" || uDay.diner === "OFFICE" || uDay.pm === "OFFICE";
+              const hasRemote =
+                !hasOffice &&
+                (uDay.am === "REMOTE" || uDay.diner === "REMOTE" || uDay.pm === "REMOTE");
+              const hasAbsent =
+                !hasOffice &&
+                !hasRemote &&
+                (uDay.am === "ABSENT" || uDay.diner === "ABSENT" || uDay.pm === "ABSENT");
 
               return (
                 <button
@@ -911,8 +1003,9 @@ export default function MobileReservationView({
                         🌴 Absent
                       </span>
                     ) : isMixed ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
-                        AM: {STATUS_CONFIG[selectedUserDay.am].shortLabel} | PM:{" "}
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                        AM: {STATUS_CONFIG[selectedUserDay.am].shortLabel} | Dîner:{" "}
+                        {STATUS_CONFIG[selectedUserDay.diner].shortLabel} | PM:{" "}
                         {STATUS_CONFIG[selectedUserDay.pm].shortLabel}
                       </span>
                     ) : (
@@ -984,14 +1077,14 @@ export default function MobileReservationView({
                   </div>
                 </div>
 
-                {/* Réglage Demi-Journées (AM / PM) */}
-                <div className="pt-2 border-t border-dashed border-gray-200 flex items-center justify-between text-xs text-gray-600">
+                {/* Réglage Plages Horaires (AM / Dîner / PM) */}
+                <div className="pt-2 border-t border-dashed border-gray-200 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600">
                   <span className="font-semibold text-gray-500 flex items-center gap-1 text-[11px]">
                     <Clock className="w-3.5 h-3.5 text-gray-400" />
-                    Demi-journées :
+                    Plages horaires :
                   </span>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
                     <button
                       type="button"
                       onClick={async () => {
@@ -1001,7 +1094,7 @@ export default function MobileReservationView({
                           navigator.vibrate(10);
                         }
                       }}
-                      className={`px-2.5 py-1 rounded-lg border text-xs font-bold transition active-press ${
+                      className={`px-2 py-1 rounded-lg border text-[11px] font-bold transition active-press ${
                         STATUS_CONFIG[selectedUserDay.am].border
                       } ${STATUS_CONFIG[selectedUserDay.am].bg} ${
                         STATUS_CONFIG[selectedUserDay.am].text
@@ -1013,13 +1106,31 @@ export default function MobileReservationView({
                     <button
                       type="button"
                       onClick={async () => {
+                        await togglePresenceAction(selectedDateKey, "diner");
+                        loadMonthData(new Date(selectedDateKey + "T12:00:00"));
+                        if (typeof window !== "undefined" && "vibrate" in navigator) {
+                          navigator.vibrate(10);
+                        }
+                      }}
+                      className={`px-2 py-1 rounded-lg border text-[11px] font-bold transition active-press ${
+                        STATUS_CONFIG[selectedUserDay.diner].border
+                      } ${STATUS_CONFIG[selectedUserDay.diner].bg} ${
+                        STATUS_CONFIG[selectedUserDay.diner].text
+                      }`}
+                    >
+                      Dîner : {STATUS_CONFIG[selectedUserDay.diner].shortLabel}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={async () => {
                         await togglePresenceAction(selectedDateKey, "pm");
                         loadMonthData(new Date(selectedDateKey + "T12:00:00"));
                         if (typeof window !== "undefined" && "vibrate" in navigator) {
                           navigator.vibrate(10);
                         }
                       }}
-                      className={`px-2.5 py-1 rounded-lg border text-xs font-bold transition active-press ${
+                      className={`px-2 py-1 rounded-lg border text-[11px] font-bold transition active-press ${
                         STATUS_CONFIG[selectedUserDay.pm].border
                       } ${STATUS_CONFIG[selectedUserDay.pm].bg} ${
                         STATUS_CONFIG[selectedUserDay.pm].text
@@ -1061,8 +1172,8 @@ export default function MobileReservationView({
                         >
                           <span>{member.firstName} {member.lastName}</span>
                           {period !== "all" && (
-                            <span className="text-[9.5px] font-bold opacity-75 uppercase">
-                              ({period})
+                            <span className="text-[9.5px] font-bold opacity-75">
+                              ({formatPeriodShort(period)})
                             </span>
                           )}
                         </span>
@@ -1102,11 +1213,15 @@ export default function MobileReservationView({
               {weekDays.slice(0, 5).map((day) => {
                 const uDay = presencesMap[day.dateKey]?.[currentUser.id] || {
                   am: "NONE",
+                  diner: "NONE",
                   pm: "NONE",
                 };
-                const fullOff = uDay.am === "OFFICE" && uDay.pm === "OFFICE";
-                const fullRem = uDay.am === "REMOTE" && uDay.pm === "REMOTE";
-                const fullAbs = uDay.am === "ABSENT" && uDay.pm === "ABSENT";
+                const fullOff =
+                  uDay.am === "OFFICE" && uDay.diner === "OFFICE" && uDay.pm === "OFFICE";
+                const fullRem =
+                  uDay.am === "REMOTE" && uDay.diner === "REMOTE" && uDay.pm === "REMOTE";
+                const fullAbs =
+                  uDay.am === "ABSENT" && uDay.diner === "ABSENT" && uDay.pm === "ABSENT";
                 const b = getDayPresenceBreakdown(day.dateKey);
                 const isExpanded = !!expandedDays[day.dateKey];
 
@@ -1259,11 +1374,7 @@ export default function MobileReservationView({
                                     </span>
                                   </div>
                                   <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 shrink-0">
-                                    {period === "all"
-                                      ? "Toute la journée"
-                                      : period === "am"
-                                      ? "Matin (AM)"
-                                      : "Après-midi (PM)"}
+                                    {formatPeriodLong(period)}
                                   </span>
                                 </div>
                               );
@@ -1354,7 +1465,7 @@ export default function MobileReservationView({
                       </span>
                     </div>
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-200 text-emerald-900">
-                      {period === "all" ? "Journée complète" : period === "am" ? "AM" : "PM"}
+                      {formatPeriodShort(period)}
                     </span>
                   </div>
                 ))}
@@ -1392,7 +1503,7 @@ export default function MobileReservationView({
                       </span>
                     </div>
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-200 text-indigo-900">
-                      {period === "all" ? "Journée complète" : period === "am" ? "AM" : "PM"}
+                      {formatPeriodShort(period)}
                     </span>
                   </div>
                 ))}
