@@ -29,14 +29,19 @@ export async function createSession(user: SessionUser) {
     .setExpirationTime("30d")
     .sign(getSecretKey());
 
-  const cookieStore = await cookies();
-  cookieStore.set("auth_token", token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 30, // 30 jours
-  });
+  try {
+    const cookieStore = await cookies();
+    cookieStore.set("auth_token", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 30, // 30 jours
+    });
+  } catch {
+    // Dans un Server Component de rendu (GET), les cookies sont en lecture seule.
+    // L'exception est interceptée pour éviter l'erreur de digest Next.js.
+  }
 
   return token;
 }
@@ -72,23 +77,9 @@ export async function requireAuth(): Promise<SessionUser> {
     dbUser = await prisma.user.findUnique({
       where: { email: session.email },
     });
-    if (dbUser) {
-      await createSession({
-        id: dbUser.id,
-        email: dbUser.email,
-        firstName: dbUser.firstName,
-        lastName: dbUser.lastName,
-        role: dbUser.role,
-        teamId: dbUser.teamId,
-        teamName: session.teamName,
-        emailVerified: dbUser.emailVerified,
-      });
-      session.id = dbUser.id;
-    }
   }
 
   if (!dbUser) {
-    await destroySession();
     redirect("/login");
   }
 
@@ -162,6 +153,10 @@ export async function checkAdminSession(): Promise<SessionUser> {
 }
 
 export async function destroySession() {
-  const cookieStore = await cookies();
-  cookieStore.delete("auth_token");
+  try {
+    const cookieStore = await cookies();
+    cookieStore.delete("auth_token");
+  } catch {
+    // Si appelé dans un contexte en lecture seule (Server Component)
+  }
 }
