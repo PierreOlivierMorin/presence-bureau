@@ -57,7 +57,7 @@ interface InvitationItem {
   expiresAt: string;
   createdAt: string;
   team: { id: string; name: string };
-  invitedBy: { firstName: string; lastName: string };
+  invitedBy?: { firstName: string; lastName: string } | null;
 }
 
 interface AuditLogItem {

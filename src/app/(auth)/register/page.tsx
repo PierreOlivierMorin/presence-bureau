@@ -127,7 +127,9 @@ export default async function RegisterPage({ searchParams }: RegisterPageProps) 
               teamName: invitation.team.name,
               teamId: invitation.teamId,
               role: invitation.role,
-              invitedByName: `${invitation.invitedBy.firstName} ${invitation.invitedBy.lastName}`,
+              invitedByName: invitation.invitedBy
+                ? `${invitation.invitedBy.firstName} ${invitation.invitedBy.lastName}`.trim()
+                : "Un administrateur",
             }
           : null
       }

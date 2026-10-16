@@ -191,7 +191,7 @@ export async function createInvitationAction(
   }>
 > {
   try {
-    const admin = await checkAdminSession();
+    const adminSession = await checkAdminSession();
     const email = formData.get("email")?.toString().trim().toLowerCase();
     const teamId = formData.get("teamId")?.toString().trim();
     const roleInput = formData.get("role")?.toString().trim();
@@ -209,6 +209,18 @@ export async function createInvitationAction(
     const team = await prisma.team.findUnique({ where: { id: teamId } });
     if (!team) {
       return { error: "Équipe sélectionnée introuvable." };
+    }
+
+    // Double sécurité : s'assurer que l'administrateur existe bel et bien en base
+    let admin = await prisma.user.findUnique({ where: { id: adminSession.id } });
+    if (!admin && adminSession.email) {
+      admin = await prisma.user.findUnique({ where: { email: adminSession.email } });
+    }
+
+    if (!admin || admin.role !== "ADMIN") {
+      return {
+        error: "Session administrateur invalide ou utilisateur introuvable en base de données. Veuillez vous reconnecter.",
+      };
     }
 
     // Vérifier si l'utilisateur existe déjà
@@ -250,9 +262,10 @@ export async function createInvitationAction(
       include: { team: true },
     });
 
+    const inviterName = `${admin.firstName || ""} ${admin.lastName || ""}`.trim() || "Un administrateur";
     const emailRes = await sendInvitationEmail({
       to: email,
-      inviterName: `${admin.firstName} ${admin.lastName}`,
+      inviterName,
       teamName: team.name,
       token,
       role,

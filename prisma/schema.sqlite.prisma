@@ -78,8 +78,8 @@ model Invitation {
   team        Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
   role        Role     @default(USER)
   token       String   @unique
-  invitedById String
-  invitedBy   User     @relation("AdminInvitations", fields: [invitedById], references: [id], onDelete: Cascade)
+  invitedById String?
+  invitedBy   User?    @relation("AdminInvitations", fields: [invitedById], references: [id], onDelete: SetNull)
   expiresAt   DateTime
   createdAt   DateTime @default(now())
 

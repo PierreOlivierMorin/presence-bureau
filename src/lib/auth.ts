@@ -1,6 +1,7 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { prisma } from "@/lib/db";
 
 function getSecretKey(): Uint8Array {
   const secret = process.env.AUTH_SECRET || "presence_bureau_secret_key_super_secure_12345";
@@ -60,11 +61,48 @@ export async function requireAuth(): Promise<SessionUser> {
     redirect("/login");
   }
 
-  if (session.emailVerified === false) {
-    redirect(`/verify-email?email=${encodeURIComponent(session.email)}`);
+  // Vérifier et synchroniser l'existence de l'utilisateur en base de données
+  let dbUser = await prisma.user.findUnique({
+    where: { id: session.id },
+  });
+
+  // Si l'ID en session est orphelin (ex: réinitialisation DB, bascule sqlite/postgres),
+  // tenter de resynchroniser automatiquement via l'adresse courriel
+  if (!dbUser && session.email) {
+    dbUser = await prisma.user.findUnique({
+      where: { email: session.email },
+    });
+    if (dbUser) {
+      await createSession({
+        id: dbUser.id,
+        email: dbUser.email,
+        firstName: dbUser.firstName,
+        lastName: dbUser.lastName,
+        role: dbUser.role,
+        teamId: dbUser.teamId,
+        teamName: session.teamName,
+        emailVerified: dbUser.emailVerified,
+      });
+      session.id = dbUser.id;
+    }
   }
 
-  return session;
+  if (!dbUser) {
+    await destroySession();
+    redirect("/login");
+  }
+
+  if (dbUser.emailVerified === false) {
+    redirect(`/verify-email?email=${encodeURIComponent(dbUser.email)}`);
+  }
+
+  return {
+    ...session,
+    id: dbUser.id,
+    role: dbUser.role,
+    teamId: dbUser.teamId,
+    emailVerified: dbUser.emailVerified,
+  };
 }
 
 export async function requireAdmin(): Promise<SessionUser> {
@@ -83,7 +121,44 @@ export async function checkAdminSession(): Promise<SessionUser> {
   if (session.role !== "ADMIN") {
     throw new Error("Droits administrateur requis.");
   }
-  return session;
+
+  // Vérifier l'existence en base de données
+  let dbUser = await prisma.user.findUnique({
+    where: { id: session.id },
+  });
+
+  // Auto-guérison de session par courriel si l'ID a changé en base
+  if (!dbUser && session.email) {
+    dbUser = await prisma.user.findUnique({
+      where: { email: session.email },
+    });
+    if (dbUser && dbUser.role === "ADMIN") {
+      await createSession({
+        id: dbUser.id,
+        email: dbUser.email,
+        firstName: dbUser.firstName,
+        lastName: dbUser.lastName,
+        role: dbUser.role,
+        teamId: dbUser.teamId,
+        teamName: session.teamName,
+        emailVerified: dbUser.emailVerified,
+      });
+      return {
+        ...session,
+        id: dbUser.id,
+      };
+    }
+  }
+
+  if (!dbUser || dbUser.role !== "ADMIN") {
+    await destroySession();
+    throw new Error("Session invalide ou utilisateur introuvable en base de données. Veuillez vous reconnecter.");
+  }
+
+  return {
+    ...session,
+    id: dbUser.id,
+  };
 }
 
 export async function destroySession() {
