@@ -6,6 +6,7 @@ import { checkAdminSession } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { createAuditLog } from "@/lib/audit";
 import { sendInvitationEmail } from "@/lib/email";
+import { getAppBaseUrl } from "@/lib/url";
 
 export type ActionResult<T = unknown> = {
   success?: boolean;
@@ -282,11 +283,8 @@ export async function createInvitationAction(
       },
     });
 
-    const baseUrl =
-      process.env.NEXTAUTH_URL ||
-      process.env.NEXT_PUBLIC_APP_URL ||
-      "http://localhost:3000";
-    const inviteUrl = `${baseUrl.replace(/\/$/, "")}/register?invite=${token}`;
+    const baseUrl = await getAppBaseUrl();
+    const inviteUrl = `${baseUrl}/register?invite=${token}`;
 
     revalidatePath("/admin");
 

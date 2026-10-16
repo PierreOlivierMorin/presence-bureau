@@ -5,6 +5,8 @@
  * et stockés temporairement pour faciliter les tests.
  */
 
+import { getAppBaseUrl } from "@/lib/url";
+
 interface SendEmailResult {
   success: boolean;
   simulated: boolean;
@@ -22,14 +24,6 @@ const devEmailInbox = new Map<
 
 export function getLatestSimulatedEmail(email: string) {
   return devEmailInbox.get(email.toLowerCase().trim());
-}
-
-function getAppBaseUrl(): string {
-  const url = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL;
-  if (url) {
-    return url.replace(/\/$/, "");
-  }
-  return "http://localhost:3000";
 }
 
 /**
@@ -113,7 +107,7 @@ export async function sendVerificationEmail({
   firstName?: string;
 }): Promise<SendEmailResult> {
   const normalizedEmail = to.toLowerCase().trim();
-  const baseUrl = getAppBaseUrl();
+  const baseUrl = await getAppBaseUrl();
   const verifyLink = `${baseUrl}/verify-email?token=${token}&email=${encodeURIComponent(
     normalizedEmail
   )}`;
@@ -212,7 +206,7 @@ export async function sendInvitationEmail({
   role: string;
 }): Promise<SendEmailResult> {
   const normalizedEmail = to.toLowerCase().trim();
-  const baseUrl = getAppBaseUrl();
+  const baseUrl = await getAppBaseUrl();
   const inviteLink = `${baseUrl}/register?invite=${token}`;
 
   devEmailInbox.set(normalizedEmail, {
@@ -296,7 +290,7 @@ export async function sendPasswordResetEmail({
   firstName?: string;
 }): Promise<SendEmailResult> {
   const normalizedEmail = to.toLowerCase().trim();
-  const baseUrl = getAppBaseUrl();
+  const baseUrl = await getAppBaseUrl();
   const resetLink = `${baseUrl}/reset-password?token=${token}&email=${encodeURIComponent(
     normalizedEmail
   )}`;
