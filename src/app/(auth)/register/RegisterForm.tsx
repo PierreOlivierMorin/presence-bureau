@@ -4,7 +4,7 @@ import { useActionState, useState } from "react";
 import { registerAction, AuthState } from "@/lib/actions/auth";
 import { getPasswordStrength, validatePassword } from "@/lib/password-policy";
 import Link from "next/link";
-import { Check, X, Shield, Users, Mail, Crown } from "lucide-react";
+import { Check, X, Shield, Users, Mail, Crown, Eye, EyeOff } from "lucide-react";
 
 interface RegisterFormProps {
   teams: { id: string; name: string }[];
@@ -25,6 +25,7 @@ export default function RegisterForm({
   isFirstUser,
 }: RegisterFormProps) {
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [state, formAction, isPending] = useActionState<AuthState | null, FormData>(
     registerAction,
     null
@@ -174,16 +175,26 @@ export default function RegisterForm({
             >
               Mot de passe
             </label>
-            <input
-              id="password"
-              name="password"
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              className="w-full px-3 py-2 border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] bg-white"
-            />
+            <div className="relative">
+              <input
+                id="password"
+                name="password"
+                type={showPassword ? "text" : "password"}
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full px-3 py-2 pr-10 border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] bg-white"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none transition"
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
 
             {/* Jauge visuelle de complexité */}
             {password.length > 0 && (

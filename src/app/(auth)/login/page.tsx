@@ -1,15 +1,16 @@
 "use client";
 
-import { Suspense, useActionState } from "react";
+import { Suspense, useActionState, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { loginAction, AuthState } from "@/lib/actions/auth";
 import Link from "next/link";
-import { Shield, CheckCircle2, AlertCircle, ArrowRight } from "lucide-react";
+import { Shield, CheckCircle2, AlertCircle, ArrowRight, Eye, EyeOff } from "lucide-react";
 
 function LoginForm() {
   const searchParams = useSearchParams();
   const isVerified = searchParams.get("verified") === "true";
   const isReset = searchParams.get("reset") === "success";
+  const [showPassword, setShowPassword] = useState(false);
 
   const [state, formAction, isPending] = useActionState<AuthState | null, FormData>(
     loginAction,
@@ -96,14 +97,24 @@ function LoginForm() {
                 Mot de passe oublié ?
               </Link>
             </div>
-            <input
-              id="password"
-              name="password"
-              type="password"
-              required
-              placeholder="••••••••"
-              className="w-full px-3 py-2 border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] bg-white"
-            />
+            <div className="relative">
+              <input
+                id="password"
+                name="password"
+                type={showPassword ? "text" : "password"}
+                required
+                placeholder="••••••••"
+                className="w-full px-3 py-2 pr-10 border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] bg-white"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none transition"
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
 
           <button
