@@ -77,10 +77,25 @@ async function sendViaResend({
       `[Email Resend Error] Échec d'envoi vers "${to}" (HTTP ${res.status}) :`,
       errorDetails
     );
+
+    let friendlyError = `Échec d'envoi Resend (HTTP ${res.status})`;
+    try {
+      const parsed = JSON.parse(errorDetails);
+      if (parsed.message) {
+        if (parsed.message.includes("You can only send testing emails to your own email address")) {
+          friendlyError = "Mode test Resend actif : 'onboarding@resend.dev' ne permet d'expédier qu'à l'adresse propriétaire du compte Resend. Pour inviter d'autres personnes, vous devez configurer un domaine vérifié sur resend.com/domains.";
+        } else {
+          friendlyError = parsed.message;
+        }
+      }
+    } catch {
+      if (errorDetails) friendlyError += ` : ${errorDetails}`;
+    }
+
     return {
       success: false,
       simulated: false,
-      error: `Échec d'envoi Resend (HTTP ${res.status}) : ${errorDetails}`,
+      error: friendlyError,
     };
   } catch (e) {
     console.error("[Email Resend Network Error]", e);

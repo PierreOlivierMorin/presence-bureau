@@ -189,6 +189,8 @@ export async function createInvitationAction(
     token: string;
     expiresAt: string;
     inviteUrl: string;
+    emailSent: boolean;
+    emailError?: string;
   }>
 > {
   try {
@@ -280,6 +282,8 @@ export async function createInvitationAction(
         teamName: team.name,
         role,
         simulated: emailRes.simulated,
+        emailSent: emailRes.success,
+        emailError: emailRes.error,
       },
     });
 
@@ -299,6 +303,8 @@ export async function createInvitationAction(
         token: invitation.token,
         expiresAt: invitation.expiresAt.toISOString(),
         inviteUrl,
+        emailSent: emailRes.success,
+        emailError: emailRes.error,
       },
     };
   } catch (e: unknown) {
@@ -367,13 +373,19 @@ export async function resendInvitationAction(invitationId: string): Promise<Acti
       data: { expiresAt: newExpiresAt },
     });
 
-    await sendInvitationEmail({
+    const emailRes = await sendInvitationEmail({
       to: invitation.email,
       inviterName: `${admin.firstName} ${admin.lastName}`,
       teamName: invitation.team.name,
       token: invitation.token,
       role: invitation.role,
     });
+
+    if (!emailRes.success) {
+      return {
+        error: emailRes.error || "Impossible d'expédier le courriel d'invitation.",
+      };
+    }
 
     await createAuditLog({
       action: "INVITATION_CREATED",

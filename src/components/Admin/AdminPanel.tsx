@@ -187,7 +187,14 @@ export default function AdminPanel({
 
         setInvitations((prev) => [newInv, ...prev]);
         setLastCreatedInvite({ url: res.data.inviteUrl, email: res.data.email });
-        showNotification(`Invitation générée et expédiée à ${res.data.email} !`);
+        if (res.data.emailSent) {
+          showNotification(`Invitation générée et expédiée avec succès à ${res.data.email} !`);
+        } else {
+          showNotification(
+            undefined,
+            `L'invitation a été créée, mais le courriel n'a pas pu être délivré (${res.data.emailError}). Vous pouvez copier le lien ci-dessous et le transmettre directement au destinataire.`
+          );
+        }
         form.reset();
       }
     });
