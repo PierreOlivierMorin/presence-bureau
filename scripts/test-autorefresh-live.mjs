@@ -36,7 +36,12 @@ async function runAutoRefreshTest() {
     const clearBtn = pageFrederique.locator('button:has-text("Effacer")').first();
     if (await clearBtn.count() > 0) {
       await clearBtn.click();
-      await pageFrederique.waitForTimeout(800);
+      await pageFrederique.waitForTimeout(400);
+      const submitBtn = pageFrederique.locator('[data-testid="submit-schedule-btn"]');
+      if (await submitBtn.isVisible()) {
+        await submitBtn.click();
+        await pageFrederique.waitForTimeout(800);
+      }
     }
 
     // 2. Connexion d'Allyne (Observatrice)
@@ -70,8 +75,13 @@ async function runAutoRefreshTest() {
     console.log("\n🏢 [Client 2 - Frédérique] S'inscrit au Bureau pour Jeudi...");
     const officeBtn = pageFrederique.locator('button:has-text("Bureau")').first();
     await officeBtn.click();
-    console.log("✅ [Client 2 - Frédérique] Inscription 'Bureau' validée pour Jeudi !");
-    await pageFrederique.waitForTimeout(800);
+    await pageFrederique.waitForTimeout(400);
+    const submitBtn = pageFrederique.locator('[data-testid="submit-schedule-btn"]');
+    if (await submitBtn.isVisible()) {
+      await submitBtn.click();
+      await pageFrederique.waitForTimeout(800);
+    }
+    console.log("✅ [Client 2 - Frédérique] Inscription 'Bureau' soumise pour Jeudi !");
 
     // 4. Client 1 (Allyne) attend SANS RIEN TOUCHER que l'auto-refresh se produise
     console.log("\n⏳ [Client 1 - Allyne] En attente de l'auto-refresh automatique (max 7 secondes)...");

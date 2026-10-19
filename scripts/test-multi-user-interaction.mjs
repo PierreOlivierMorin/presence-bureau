@@ -64,7 +64,12 @@ async function runTest() {
     console.log("🏢 [Frédérique] Réservation de la journée 'Bureau'...");
     const officeBtn = pageFrederique.locator('button[data-testid="btn-action-office"]');
     await officeBtn.click();
-    await pageFrederique.waitForTimeout(1500);
+    await pageFrederique.waitForTimeout(400);
+    const submitBtnFrederique = pageFrederique.locator('[data-testid="submit-schedule-btn"]');
+    if (await submitBtnFrederique.isVisible()) {
+      await submitBtnFrederique.click();
+      await pageFrederique.waitForTimeout(1000);
+    }
 
     await pageFrederique.screenshot({
       path: path.join(SCREENSHOT_DIR, "1-frederique-booked-office.png"),
@@ -101,7 +106,12 @@ async function runTest() {
     console.log("🏠 [Allyne] Réservation de la journée 'Télétravail'...");
     const remoteBtn = pageAllyne.locator('button[data-testid="btn-action-remote"]');
     await remoteBtn.click();
-    await pageAllyne.waitForTimeout(1500);
+    await pageAllyne.waitForTimeout(400);
+    const submitBtnAllyne = pageAllyne.locator('[data-testid="submit-schedule-btn"]');
+    if (await submitBtnAllyne.isVisible()) {
+      await submitBtnAllyne.click();
+      await pageAllyne.waitForTimeout(1000);
+    }
 
     await pageAllyne.screenshot({
       path: path.join(SCREENSHOT_DIR, "2-allyne-sees-frederique-and-books-tt.png"),

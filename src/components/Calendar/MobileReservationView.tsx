@@ -3,8 +3,6 @@
 import { useState, useTransition, useMemo, useCallback, useEffect, useRef } from "react";
 import { SessionUser } from "@/lib/auth";
 import {
-  togglePresenceAction,
-  setDayPresenceAction,
   batchSetPresencesAction,
   getMonthPresencesAction,
 } from "@/lib/actions/presence";
@@ -35,6 +33,7 @@ import {
 import InstallPwaPrompt from "@/components/PWA/InstallPwaPrompt";
 
 export type StatusType = "NONE" | "OFFICE" | "REMOTE" | "ABSENT";
+const STATUS_CYCLE: StatusType[] = ["NONE", "OFFICE", "REMOTE", "ABSENT"];
 
 export interface TeamMember {
   id: string;
@@ -193,6 +192,24 @@ export default function MobileReservationView({
     return map;
   });
 
+  const [savedPresences, setSavedPresences] = useState<
+    Record<string, { am: StatusType; diner: StatusType; pm: StatusType }>
+  >(() => {
+    const map: Record<string, { am: StatusType; diner: StatusType; pm: StatusType }> = {};
+    for (const p of initialPresences) {
+      if (p.userId === currentUser.id) {
+        map[p.date] = {
+          am: (p.amStatus as StatusType) || "NONE",
+          diner: (p.dinerStatus as StatusType) || "NONE",
+          pm: (p.pmStatus as StatusType) || "NONE",
+        };
+      }
+    }
+    return map;
+  });
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   // Current Date reference
   const today = useMemo(() => new Date(), []);
   const todayKey = useMemo(() => formatDateKey(today), [today]);
@@ -213,6 +230,43 @@ export default function MobileReservationView({
 
   const daysScrollRef = useRef<HTMLDivElement>(null);
   const [isPending, startTransition] = useTransition();
+
+  // Dates modifiées localement n'ayant pas encore été soumises au serveur
+  const pendingDates = useMemo(() => {
+    const dates = new Set<string>();
+    for (const dateKey of Object.keys(presencesMap)) {
+      const current = presencesMap[dateKey]?.[currentUser.id] || { am: "NONE", diner: "NONE", pm: "NONE" };
+      const saved = savedPresences[dateKey] || { am: "NONE", diner: "NONE", pm: "NONE" };
+      if (current.am !== saved.am || current.diner !== saved.diner || current.pm !== saved.pm) {
+        dates.add(dateKey);
+      }
+    }
+    for (const dateKey of Object.keys(savedPresences)) {
+      const current = presencesMap[dateKey]?.[currentUser.id] || { am: "NONE", diner: "NONE", pm: "NONE" };
+      const saved = savedPresences[dateKey];
+      if (current.am !== saved.am || current.diner !== saved.diner || current.pm !== saved.pm) {
+        dates.add(dateKey);
+      }
+    }
+    return Array.from(dates);
+  }, [presencesMap, savedPresences, currentUser.id]);
+
+  const pendingDatesRef = useRef<string[]>([]);
+  useEffect(() => {
+    pendingDatesRef.current = pendingDates;
+  }, [pendingDates]);
+
+  // Alerte si l'utilisateur quitte la page avec des modifications non soumises
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (pendingDates.length > 0) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [pendingDates.length]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -235,14 +289,23 @@ export default function MobileReservationView({
 
       setTeamMembers(res.teamMembers);
       const newMap: Record<string, Record<string, { am: StatusType; diner: StatusType; pm: StatusType }>> = {};
+      const newSaved: Record<string, { am: StatusType; diner: StatusType; pm: StatusType }> = {};
+
       for (const p of res.presences) {
         if (!newMap[p.date]) newMap[p.date] = {};
-        newMap[p.date][p.userId] = {
+        const statusObj = {
           am: (p.amStatus as StatusType) || "NONE",
           diner: (p.dinerStatus as StatusType) || "NONE",
           pm: (p.pmStatus as StatusType) || "NONE",
         };
+        newMap[p.date][p.userId] = statusObj;
+        if (p.userId === currentUser.id) {
+          newSaved[p.date] = statusObj;
+        }
       }
+
+      setSavedPresences((prev) => ({ ...prev, ...newSaved }));
+
       setPresencesMap((prev) => {
         const copy = { ...prev };
         const prefix = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, "0")}-`;
@@ -251,10 +314,18 @@ export default function MobileReservationView({
             delete copy[k];
           }
         }
-        return { ...copy, ...newMap };
+        const merged = { ...copy, ...newMap };
+        // Conserver les choix non soumis de l'utilisateur
+        for (const d of pendingDatesRef.current) {
+          if (prev[d]?.[currentUser.id]) {
+            if (!merged[d]) merged[d] = {};
+            merged[d][currentUser.id] = prev[d][currentUser.id];
+          }
+        }
+        return merged;
       });
     });
-  }, [selectedTeamId]);
+  }, [selectedTeamId, currentUser.id]);
 
   // Actualisation automatique en temps réel (auto-refresh) :
   // - Polling toutes les 5 secondes lorsque la page est visible
@@ -455,8 +526,8 @@ export default function MobileReservationView({
     }
   };
 
-  // 1-Tap set day presence
-  const handleSetDayStatus = async (
+  // 1-Tap set day presence (localement, sans requête immédiate)
+  const handleSetDayStatus = (
     dateKey: string,
     status: StatusType,
     period: "all" | "am" | "diner" | "pm" = "all"
@@ -489,7 +560,7 @@ export default function MobileReservationView({
       newPm = prevEntry.pm === status ? "NONE" : status;
     }
 
-    // Mise à jour optimiste
+    // Mise à jour locale
     setPresencesMap((prev) => ({
       ...prev,
       [dateKey]: {
@@ -501,28 +572,37 @@ export default function MobileReservationView({
     if (typeof window !== "undefined" && "vibrate" in navigator) {
       navigator.vibrate(15);
     }
+  };
 
-    try {
-      if (period === "all") {
-        await setDayPresenceAction(dateKey, newAm, "all");
-      } else {
-        const nextVal = period === "am" ? newAm : period === "diner" ? newDiner : newPm;
-        await setDayPresenceAction(dateKey, nextVal, period);
-      }
-    } catch {
-      setPresencesMap((prev) => ({
-        ...prev,
-        [dateKey]: {
-          ...(prev[dateKey] || {}),
-          [currentUser.id]: prevEntry,
+  // Bascule locale d'un créneau AM / Dîner / PM (sans requête immédiate)
+  const handleToggleSlot = (dateKey: string, period: "am" | "diner" | "pm") => {
+    const prevEntry = presencesMap[dateKey]?.[currentUser.id] || {
+      am: "NONE",
+      diner: "NONE",
+      pm: "NONE",
+    };
+    const currentStatus = prevEntry[period] || "NONE";
+    const nextIndex = (STATUS_CYCLE.indexOf(currentStatus) + 1) % STATUS_CYCLE.length;
+    const nextStatus = STATUS_CYCLE[nextIndex];
+
+    setPresencesMap((prev) => ({
+      ...prev,
+      [dateKey]: {
+        ...(prev[dateKey] || {}),
+        [currentUser.id]: {
+          ...prevEntry,
+          [period]: nextStatus,
         },
-      }));
-      showToast("Erreur lors de l'enregistrement");
+      },
+    }));
+
+    if (typeof window !== "undefined" && "vibrate" in navigator) {
+      navigator.vibrate(10);
     }
   };
 
-  // Modèles de semaine type
-  const handleApplyPreset = async (
+  // Modèles de semaine type (appliqués localement en attente de soumission)
+  const handleApplyPreset = (
     presetType: "office_all" | "hybrid_3_2" | "hybrid_2_3" | "remote_all" | "clear_all"
   ) => {
     setShowPresetModal(false);
@@ -570,14 +650,72 @@ export default function MobileReservationView({
       return copy;
     });
 
-    showToast("Semaine type enregistrée !");
+    if (typeof window !== "undefined" && "vibrate" in navigator) {
+      navigator.vibrate(20);
+    }
+
+    showToast("Modèle appliqué ! Cliquez sur 'Soumettre' en haut pour enregistrer.");
+  };
+
+  // Soumission groupée de l'horaire sélectionné en une seule requête
+  const handleSubmitSchedule = async () => {
+    if (pendingDates.length === 0 || isSubmitting) return;
+
+    setIsSubmitting(true);
+    const entries = pendingDates.map((dateKey) => {
+      const uDay = presencesMap[dateKey]?.[currentUser.id] || {
+        am: "NONE" as StatusType,
+        diner: "NONE" as StatusType,
+        pm: "NONE" as StatusType,
+      };
+      return {
+        date: dateKey,
+        amStatus: uDay.am,
+        dinerStatus: uDay.diner,
+        pmStatus: uDay.pm,
+      };
+    });
 
     try {
-      await batchSetPresencesAction(updates);
+      await batchSetPresencesAction(entries);
+
+      setSavedPresences((prev) => {
+        const copy = { ...prev };
+        for (const entry of entries) {
+          copy[entry.date] = {
+            am: entry.amStatus,
+            diner: entry.dinerStatus ?? entry.amStatus,
+            pm: entry.pmStatus,
+          };
+        }
+        return copy;
+      });
+
+      if (typeof window !== "undefined" && "vibrate" in navigator) {
+        navigator.vibrate([20, 50, 20]);
+      }
+      showToast(`Horaire soumis avec succès ! (${entries.length} jour${entries.length > 1 ? "s" : ""})`);
     } catch {
-      showToast("Erreur lors de l'application du modèle");
-      loadMonthData(weekStart);
+      showToast("Erreur lors de la soumission de l'horaire");
+    } finally {
+      setIsSubmitting(false);
     }
+  };
+
+  // Annuler les modifications non soumises
+  const handleCancelChanges = () => {
+    setPresencesMap((prev) => {
+      const copy = { ...prev };
+      for (const d of pendingDates) {
+        if (!copy[d]) copy[d] = {};
+        copy[d] = {
+          ...copy[d],
+          [currentUser.id]: savedPresences[d] || { am: "NONE", diner: "NONE", pm: "NONE" },
+        };
+      }
+      return copy;
+    });
+    showToast("Modifications annulées");
   };
 
   // Analyse des présences d'un jour pour l'équipe
@@ -695,66 +833,126 @@ export default function MobileReservationView({
       )}
 
       {/* Top App Bar */}
-      <div className="sticky top-0 z-30 bg-[var(--card-bg)]/95 backdrop-blur-md px-3.5 py-2.5 border-b border-[var(--border)] shadow-xs flex items-center justify-between">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center text-white font-bold text-xs shadow-xs shrink-0">
-            PB
+      <div className="sticky top-0 z-30 bg-[var(--card-bg)]/95 backdrop-blur-md border-b border-[var(--border)] shadow-xs">
+        <div className="px-3.5 py-2.5 flex items-center justify-between">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center text-white font-bold text-xs shadow-xs shrink-0">
+              PB
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-xs font-bold truncate leading-tight text-gray-900">
+                {currentUser.firstName} {currentUser.lastName}
+              </h1>
+              <p className="text-[11px] text-[var(--muted)] flex items-center gap-1 truncate">
+                <Users className="w-3 h-3 text-blue-600 shrink-0" />
+                <span className="truncate">
+                  {allTeams?.find((t) => t.id === selectedTeamId)?.name || "Équipe"}
+                </span>
+              </p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <h1 className="text-xs font-bold truncate leading-tight text-gray-900">
-              {currentUser.firstName} {currentUser.lastName}
-            </h1>
-            <p className="text-[11px] text-[var(--muted)] flex items-center gap-1 truncate">
-              <Users className="w-3 h-3 text-blue-600 shrink-0" />
-              <span className="truncate">
-                {allTeams?.find((t) => t.id === selectedTeamId)?.name || "Équipe"}
-              </span>
-            </p>
-          </div>
-        </div>
 
-        <div className="flex items-center gap-1.5">
-          <span
-            data-testid="live-indicator"
-            className="flex items-center gap-1 text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 shrink-0 select-none"
-            title="Mises à jour automatiques en direct actives"
-          >
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="hidden xs:inline">Direct</span>
-          </span>
+          <div className="flex items-center gap-1.5">
+            {pendingDates.length > 0 && (
+              <button
+                type="button"
+                onClick={handleSubmitSchedule}
+                disabled={isSubmitting}
+                data-testid="header-submit-schedule-btn"
+                className="px-2.5 py-1 text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-xs flex items-center gap-1 active-press transition disabled:opacity-50"
+                title="Soumettre l'horaire sélectionné"
+              >
+                {isSubmitting ? (
+                  <RotateCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Check className="w-3.5 h-3.5" />
+                )}
+                <span>Soumettre ({pendingDates.length})</span>
+              </button>
+            )}
 
-          <button
-            onClick={() => {
-              loadMonthData(new Date(selectedDateKey + "T12:00:00"));
-              showToast("Données actualisées");
-            }}
-            disabled={isPending}
-            className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-gray-100 rounded-lg active-press transition disabled:opacity-50"
-            title="Actualiser les présences de l'équipe"
-          >
-            <RotateCw className={`w-3.5 h-3.5 ${isPending ? "animate-spin text-blue-600" : ""}`} />
-          </button>
-
-          {onSwitchToDesktop && (
-            <button
-              onClick={onSwitchToDesktop}
-              className="px-2.5 py-1 text-xs text-gray-600 hover:text-gray-900 bg-gray-100 rounded-lg flex items-center gap-1 active-press"
-              title="Basculer vers la vue grille bureau"
+            <span
+              data-testid="live-indicator"
+              className="flex items-center gap-1 text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 shrink-0 select-none"
+              title="Mises à jour automatiques en direct actives"
             >
-              <ArrowRightLeft className="w-3.5 h-3.5" />
-              <span className="text-[11px] font-medium hidden xs:inline">Grille</span>
-            </button>
-          )}
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="hidden xs:inline">Direct</span>
+            </span>
 
-          <button
-            onClick={() => setShowPwaInstallModal(true)}
-            className="px-2.5 py-1 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg flex items-center gap-1 active-press"
-            title="Installer l'application sur votre écran d'accueil"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span className="text-[11px] font-bold hidden xs:inline">App</span>
-          </button>
+            <button
+              onClick={() => {
+                loadMonthData(new Date(selectedDateKey + "T12:00:00"));
+                showToast("Données actualisées");
+              }}
+              disabled={isPending}
+              className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-gray-100 rounded-lg active-press transition disabled:opacity-50"
+              title="Actualiser les présences de l'équipe"
+            >
+              <RotateCw className={`w-3.5 h-3.5 ${isPending ? "animate-spin text-blue-600" : ""}`} />
+            </button>
+
+            {onSwitchToDesktop && (
+              <button
+                onClick={onSwitchToDesktop}
+                className="px-2.5 py-1 text-xs text-gray-600 hover:text-gray-900 bg-gray-100 rounded-lg flex items-center gap-1 active-press"
+                title="Basculer vers la vue grille bureau"
+              >
+                <ArrowRightLeft className="w-3.5 h-3.5" />
+                <span className="text-[11px] font-medium hidden xs:inline">Grille</span>
+              </button>
+            )}
+
+            <button
+              onClick={() => setShowPwaInstallModal(true)}
+              className="px-2.5 py-1 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg flex items-center gap-1 active-press"
+              title="Installer l'application sur votre écran d'accueil"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span className="text-[11px] font-bold hidden xs:inline">App</span>
+            </button>
+          </div>
         </div>
+
+        {/* Bouton / Bannière 'Soumettre' en haut de la page après sélection d'horaire */}
+        {pendingDates.length > 0 && (
+          <div
+            data-testid="pending-schedule-banner"
+            className="bg-emerald-600 text-white px-3.5 py-2 border-t border-emerald-500/40 flex items-center justify-between shadow-sm animate-in slide-in-from-top-2 duration-150"
+          >
+            <div className="flex items-center gap-2 text-xs font-bold">
+              <span className="w-2 h-2 rounded-full bg-white animate-ping" />
+              <span>
+                {pendingDates.length} jour{pendingDates.length > 1 ? "s" : ""} sélectionné{pendingDates.length > 1 ? "s" : ""}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleCancelChanges}
+                disabled={isSubmitting}
+                data-testid="cancel-schedule-btn"
+                className="px-2.5 py-1 text-xs font-semibold bg-emerald-700 hover:bg-emerald-800 text-emerald-100 rounded-lg active-press transition"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmitSchedule}
+                disabled={isSubmitting}
+                data-testid="submit-schedule-btn"
+                className="px-3.5 py-1 text-xs font-black bg-white text-emerald-700 hover:bg-emerald-50 rounded-lg shadow-xs flex items-center gap-1.5 active-press transition disabled:opacity-50"
+              >
+                {isSubmitting ? (
+                  <RotateCw className="w-3.5 h-3.5 animate-spin text-emerald-700" />
+                ) : (
+                  <Check className="w-3.5 h-3.5 text-emerald-700" />
+                )}
+                <span>Soumettre l&apos;horaire</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ============================================================== */}
@@ -835,22 +1033,29 @@ export default function MobileReservationView({
                 !hasRemote &&
                 (uDay.am === "ABSENT" || uDay.diner === "ABSENT" || uDay.pm === "ABSENT");
 
+              const isDayPending = pendingDates.includes(day.dateKey);
+
               return (
                 <button
                   key={day.dateKey}
                   data-selected={day.isSelected}
                   onClick={() => handleSelectDay(day.dateKey)}
-                  className={`flex-1 min-w-[42px] max-w-[56px] py-1.5 px-0.5 rounded-xl flex flex-col items-center justify-between text-center transition active-press snap-center border ${
+                  className={`flex-1 min-w-[42px] max-w-[56px] py-1.5 px-0.5 rounded-xl flex flex-col items-center justify-between text-center transition active-press snap-center border relative ${
                     day.isSelected
                       ? "bg-blue-600 text-white border-blue-600 shadow-sm shadow-blue-500/30 scale-102"
+                      : isDayPending
+                      ? "bg-amber-50 text-amber-900 border-amber-300 ring-1 ring-amber-300/40"
                       : day.isToday
                       ? "bg-blue-50/70 text-blue-900 border-blue-300"
                       : "bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100"
                   }`}
                 >
+                  {isDayPending && !day.isSelected && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 absolute top-1 right-1" title="Modifié, non soumis" />
+                  )}
                   <span
                     className={`text-[9px] font-bold leading-none ${
-                      day.isSelected ? "text-blue-100" : "text-gray-500"
+                      day.isSelected ? "text-blue-100" : isDayPending ? "text-amber-800" : "text-gray-500"
                     }`}
                   >
                     {day.dayName}
@@ -989,7 +1194,13 @@ export default function MobileReservationView({
                   </div>
 
                   {/* Badge statut actuel */}
-                  <div>
+                  <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                    {pendingDates.includes(selectedDateKey) && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                        Non soumis
+                      </span>
+                    )}
                     {isFullOffice ? (
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
                         🏢 Bureau
@@ -1087,13 +1298,7 @@ export default function MobileReservationView({
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
-                      onClick={async () => {
-                        await togglePresenceAction(selectedDateKey, "am");
-                        loadMonthData(new Date(selectedDateKey + "T12:00:00"));
-                        if (typeof window !== "undefined" && "vibrate" in navigator) {
-                          navigator.vibrate(10);
-                        }
-                      }}
+                      onClick={() => handleToggleSlot(selectedDateKey, "am")}
                       className={`px-2 py-1 rounded-lg border text-[11px] font-bold transition active-press ${
                         STATUS_CONFIG[selectedUserDay.am].border
                       } ${STATUS_CONFIG[selectedUserDay.am].bg} ${
@@ -1105,13 +1310,7 @@ export default function MobileReservationView({
 
                     <button
                       type="button"
-                      onClick={async () => {
-                        await togglePresenceAction(selectedDateKey, "diner");
-                        loadMonthData(new Date(selectedDateKey + "T12:00:00"));
-                        if (typeof window !== "undefined" && "vibrate" in navigator) {
-                          navigator.vibrate(10);
-                        }
-                      }}
+                      onClick={() => handleToggleSlot(selectedDateKey, "diner")}
                       className={`px-2 py-1 rounded-lg border text-[11px] font-bold transition active-press ${
                         STATUS_CONFIG[selectedUserDay.diner].border
                       } ${STATUS_CONFIG[selectedUserDay.diner].bg} ${
@@ -1123,13 +1322,7 @@ export default function MobileReservationView({
 
                     <button
                       type="button"
-                      onClick={async () => {
-                        await togglePresenceAction(selectedDateKey, "pm");
-                        loadMonthData(new Date(selectedDateKey + "T12:00:00"));
-                        if (typeof window !== "undefined" && "vibrate" in navigator) {
-                          navigator.vibrate(10);
-                        }
-                      }}
+                      onClick={() => handleToggleSlot(selectedDateKey, "pm")}
                       className={`px-2 py-1 rounded-lg border text-[11px] font-bold transition active-press ${
                         STATUS_CONFIG[selectedUserDay.pm].border
                       } ${STATUS_CONFIG[selectedUserDay.pm].bg} ${
@@ -1225,12 +1418,16 @@ export default function MobileReservationView({
                 const b = getDayPresenceBreakdown(day.dateKey);
                 const isExpanded = !!expandedDays[day.dateKey];
 
+                const isDayPending = pendingDates.includes(day.dateKey);
+
                 return (
                   <div
                     key={day.dateKey}
                     data-testid={`week-day-card-${day.dateKey}`}
                     className={`bg-[var(--card-bg)] rounded-xl border transition shadow-xs overflow-hidden ${
-                      day.isSelected
+                      isDayPending
+                        ? "border-amber-400 ring-2 ring-amber-300/40 bg-amber-50/20"
+                        : day.isSelected
                         ? "border-blue-500 ring-2 ring-blue-500/20"
                         : "border-[var(--border)]"
                     }`}
@@ -1270,6 +1467,11 @@ export default function MobileReservationView({
                                 month: "short",
                               }).format(day.date)}
                             </span>
+                            {isDayPending && (
+                              <span className="text-[9px] font-bold text-amber-800 bg-amber-100 border border-amber-200 px-1 py-0.2 rounded leading-tight">
+                                Modifié
+                              </span>
+                            )}
                             {isExpanded ? (
                               <ChevronUp className="w-3.5 h-3.5 text-blue-600 shrink-0" />
                             ) : (

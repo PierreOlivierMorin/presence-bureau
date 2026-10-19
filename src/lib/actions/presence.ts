@@ -151,7 +151,8 @@ export async function setDayPresenceAction(
   return updated;
 }
 
-export async function batchSetPresencesAction(
+export async function batchSetPresencesForUser(
+  userId: string,
   entries: {
     date: string;
     amStatus: "NONE" | "OFFICE" | "REMOTE" | "ABSENT";
@@ -159,24 +160,27 @@ export async function batchSetPresencesAction(
     pmStatus: "NONE" | "OFFICE" | "REMOTE" | "ABSENT";
   }[]
 ) {
-  const session = await requireAuth();
   await ensurePresenceDinerColumn();
 
-  for (const entry of entries) {
+  if (!entries || entries.length === 0) {
+    return { success: true, count: 0 };
+  }
+
+  const ops = entries.map((entry) => {
     const dinerStatus = entry.dinerStatus ?? entry.amStatus;
     if (entry.amStatus === "NONE" && dinerStatus === "NONE" && entry.pmStatus === "NONE") {
-      await prisma.presence.deleteMany({
+      return prisma.presence.deleteMany({
         where: {
           date: entry.date,
-          userId: session.id,
+          userId,
         },
       });
     } else {
-      await prisma.presence.upsert({
+      return prisma.presence.upsert({
         where: {
           date_userId: {
             date: entry.date,
-            userId: session.id,
+            userId,
           },
         },
         update: {
@@ -186,17 +190,32 @@ export async function batchSetPresencesAction(
         },
         create: {
           date: entry.date,
-          userId: session.id,
+          userId,
           amStatus: entry.amStatus,
           dinerStatus,
           pmStatus: entry.pmStatus,
         },
       });
     }
-  }
+  });
 
+  await prisma.$transaction(ops);
+  return { success: true, count: entries.length };
+}
+
+export async function batchSetPresencesAction(
+  entries: {
+    date: string;
+    amStatus: "NONE" | "OFFICE" | "REMOTE" | "ABSENT";
+    dinerStatus?: "NONE" | "OFFICE" | "REMOTE" | "ABSENT";
+    pmStatus: "NONE" | "OFFICE" | "REMOTE" | "ABSENT";
+  }[]
+) {
+  const session = await requireAuth();
+  const result = await batchSetPresencesForUser(session.id, entries);
   revalidatePath("/");
-  return { success: true };
+  revalidatePath("/mobile");
+  return result;
 }
 
 export async function getMonthPresencesAction(year: number, month: number, targetTeamId?: string) {

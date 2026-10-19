@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback, useTransition } from "react";
+import { useState, useEffect, useCallback, useTransition, useMemo, useRef } from "react";
 import { SessionUser } from "@/lib/auth";
-import { togglePresenceAction, getMonthPresencesAction } from "@/lib/actions/presence";
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Users, Smartphone } from "lucide-react";
+import { getMonthPresencesAction, batchSetPresencesAction } from "@/lib/actions/presence";
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Users, Smartphone, Check, CheckCircle2, RotateCw } from "lucide-react";
 import MobileReservationView from "./MobileReservationView";
 
 export type StatusType = "NONE" | "OFFICE" | "REMOTE" | "ABSENT";
@@ -72,10 +72,64 @@ export default function CalendarView({
     return map;
   });
 
+  const [savedPresences, setSavedPresences] = useState<
+    Record<string, { am: StatusType; diner: StatusType; pm: StatusType }>
+  >(() => {
+    const map: Record<string, { am: StatusType; diner: StatusType; pm: StatusType }> = {};
+    for (const p of initialPresences) {
+      if (p.userId === currentUser.id) {
+        map[p.date] = {
+          am: (p.amStatus as StatusType) || "NONE",
+          diner: (p.dinerStatus as StatusType) || "NONE",
+          pm: (p.pmStatus as StatusType) || "NONE",
+        };
+      }
+    }
+    return map;
+  });
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const [viewMode, setViewMode] = useState<"auto" | "mobile" | "desktop">("auto");
   const [isMobileScreen, setIsMobileScreen] = useState(false);
+
+  // Dates modifiées localement n'ayant pas encore été soumises au serveur
+  const pendingDates = useMemo(() => {
+    const dates = new Set<string>();
+    for (const dateKey of Object.keys(presencesMap)) {
+      const current = presencesMap[dateKey]?.[currentUser.id] || { am: "NONE", diner: "NONE", pm: "NONE" };
+      const saved = savedPresences[dateKey] || { am: "NONE", diner: "NONE", pm: "NONE" };
+      if (current.am !== saved.am || current.diner !== saved.diner || current.pm !== saved.pm) {
+        dates.add(dateKey);
+      }
+    }
+    for (const dateKey of Object.keys(savedPresences)) {
+      const current = presencesMap[dateKey]?.[currentUser.id] || { am: "NONE", diner: "NONE", pm: "NONE" };
+      const saved = savedPresences[dateKey];
+      if (current.am !== saved.am || current.diner !== saved.diner || current.pm !== saved.pm) {
+        dates.add(dateKey);
+      }
+    }
+    return Array.from(dates);
+  }, [presencesMap, savedPresences, currentUser.id]);
+
+  const pendingDatesRef = useRef<string[]>([]);
+  useEffect(() => {
+    pendingDatesRef.current = pendingDates;
+  }, [pendingDates]);
+
+  // Alerte si l'utilisateur quitte la page avec des modifications non soumises
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (pendingDates.length > 0) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [pendingDates.length]);
 
   useEffect(() => {
     const checkMobile = () => {
@@ -99,7 +153,6 @@ export default function CalendarView({
     year: "numeric",
   }).format(currentDate);
 
-
   // Changement de mois ou d'équipe
   const loadMonthData = useCallback((targetDate: Date, targetTeamId?: string) => {
     setCurrentDate(targetDate);
@@ -112,17 +165,35 @@ export default function CalendarView({
 
       setTeamMembers(res.teamMembers);
       const newMap: Record<string, Record<string, { am: StatusType; diner: StatusType; pm: StatusType }>> = {};
+      const newSaved: Record<string, { am: StatusType; diner: StatusType; pm: StatusType }> = {};
+
       for (const p of res.presences) {
         if (!newMap[p.date]) newMap[p.date] = {};
-        newMap[p.date][p.userId] = {
+        const statusObj = {
           am: (p.amStatus as StatusType) || "NONE",
           diner: (p.dinerStatus as StatusType) || "NONE",
           pm: (p.pmStatus as StatusType) || "NONE",
         };
+        newMap[p.date][p.userId] = statusObj;
+        if (p.userId === currentUser.id) {
+          newSaved[p.date] = statusObj;
+        }
       }
-      setPresencesMap(newMap);
+
+      setSavedPresences((prev) => ({ ...prev, ...newSaved }));
+      setPresencesMap((prev) => {
+        const merged = { ...newMap };
+        // Préserver les modifications locales non soumises de l'utilisateur
+        for (const d of pendingDatesRef.current) {
+          if (prev[d]?.[currentUser.id]) {
+            if (!merged[d]) merged[d] = {};
+            merged[d][currentUser.id] = prev[d][currentUser.id];
+          }
+        }
+        return merged;
+      });
     });
-  }, [selectedTeamId]);
+  }, [selectedTeamId, currentUser.id]);
 
   // Auto-refresh pour récupérer les présences et inscriptions en temps réel
   useEffect(() => {
@@ -171,9 +242,8 @@ export default function CalendarView({
     loadMonthData(currentDate, newTeamId);
   };
 
-  // Bascule optimiste de statut AM/Dîner/PM pour l'utilisateur connecté
-  const handleToggleSlot = async (dateKey: string, period: "am" | "diner" | "pm") => {
-    // Statut actuel
+  // Bascule locale de statut AM/Dîner/PM (sans requête immédiate)
+  const handleToggleSlot = (dateKey: string, period: "am" | "diner" | "pm") => {
     const userPresence = presencesMap[dateKey]?.[currentUser.id] || {
       am: "NONE",
       diner: "NONE",
@@ -183,7 +253,6 @@ export default function CalendarView({
     const nextIndex = (STATUS_CYCLE.indexOf(currentStatus) + 1) % STATUS_CYCLE.length;
     const nextStatus = STATUS_CYCLE[nextIndex];
 
-    // Mise à jour optimiste
     setPresencesMap((prev) => {
       const copy = { ...prev };
       const existingDay = copy[dateKey]?.[currentUser.id] || {
@@ -201,30 +270,60 @@ export default function CalendarView({
       };
       return copy;
     });
+  };
 
-    // Envoi au serveur
+  // Soumission groupée de l'horaire complet en une seule requête
+  const handleSubmitSchedule = async () => {
+    if (pendingDates.length === 0 || isSubmitting) return;
+
+    setIsSubmitting(true);
+    const entries = pendingDates.map((dateKey) => {
+      const u = presencesMap[dateKey]?.[currentUser.id] || {
+        am: "NONE" as StatusType,
+        diner: "NONE" as StatusType,
+        pm: "NONE" as StatusType,
+      };
+      return {
+        date: dateKey,
+        amStatus: u.am,
+        dinerStatus: u.diner,
+        pmStatus: u.pm,
+      };
+    });
+
     try {
-      await togglePresenceAction(dateKey, period);
-    } catch {
-      // Annulation en cas d'erreur
-      setPresencesMap((prev) => {
+      await batchSetPresencesAction(entries);
+      setSavedPresences((prev) => {
         const copy = { ...prev };
-        const existingDay = copy[dateKey]?.[currentUser.id] || {
-          am: "NONE" as StatusType,
-          diner: "NONE" as StatusType,
-          pm: "NONE" as StatusType,
-        };
-        if (!copy[dateKey]) copy[dateKey] = {};
-        copy[dateKey] = {
-          ...copy[dateKey],
-          [currentUser.id]: {
-            ...existingDay,
-            [period]: currentStatus,
-          },
-        };
+        for (const entry of entries) {
+          copy[entry.date] = {
+            am: entry.amStatus,
+            diner: entry.dinerStatus ?? entry.amStatus,
+            pm: entry.pmStatus,
+          };
+        }
         return copy;
       });
+    } catch {
+      alert("Erreur lors de la soumission de l'horaire.");
+    } finally {
+      setIsSubmitting(false);
     }
+  };
+
+  // Annuler les modifications non soumises
+  const handleCancelChanges = () => {
+    setPresencesMap((prev) => {
+      const copy = { ...prev };
+      for (const d of pendingDates) {
+        if (!copy[d]) copy[d] = {};
+        copy[d] = {
+          ...copy[d],
+          [currentUser.id]: savedPresences[d] || { am: "NONE", diner: "NONE", pm: "NONE" },
+        };
+      }
+      return copy;
+    });
   };
 
   // Calcul des cases calendaires (Lun -> Dim)
@@ -292,6 +391,54 @@ export default function CalendarView({
         </div>
       </div>
 
+      {/* Bannière de soumission de l'horaire */}
+      {pendingDates.length > 0 && (
+        <div
+          data-testid="desktop-pending-schedule-banner"
+          className="mb-4 bg-emerald-50 border border-emerald-300 rounded-2xl p-3.5 sm:p-4 flex flex-wrap items-center justify-between gap-3 shadow-sm animate-in fade-in"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shrink-0">
+              <Check className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-emerald-950">
+                Horaire sélectionné : {pendingDates.length} jour{pendingDates.length > 1 ? "s" : ""} à soumettre
+              </h3>
+              <p className="text-xs text-emerald-700">
+                Vos choix sont prêts. Soumettez l&apos;horaire complet en une seule fois pour enregistrer.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleCancelChanges}
+              disabled={isSubmitting}
+              data-testid="desktop-cancel-schedule-btn"
+              className="px-3.5 py-2 text-xs font-semibold text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 active-press transition"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmitSchedule}
+              disabled={isSubmitting}
+              data-testid="desktop-submit-schedule-btn"
+              className="px-4 py-2 text-xs font-black text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-sm flex items-center gap-2 active-press transition disabled:opacity-50"
+            >
+              {isSubmitting ? (
+                <RotateCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <Check className="w-4 h-4" />
+              )}
+              <span>Soumettre mon horaire</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Barre de navigation par mois */}
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-bold capitalize text-[var(--text)] flex items-center gap-2">
@@ -312,6 +459,23 @@ export default function CalendarView({
         </h2>
 
         <div className="flex items-center gap-2">
+          {pendingDates.length > 0 && (
+            <button
+              type="button"
+              onClick={handleSubmitSchedule}
+              disabled={isSubmitting}
+              data-testid="month-bar-submit-btn"
+              className="px-3 py-1.5 text-xs font-black text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm flex items-center gap-1.5 active-press transition disabled:opacity-50"
+              title="Soumettre l'horaire sélectionné"
+            >
+              {isSubmitting ? (
+                <RotateCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Check className="w-3.5 h-3.5" />
+              )}
+              <span>Soumettre ({pendingDates.length})</span>
+            </button>
+          )}
           <button
             onClick={() => setViewMode("mobile")}
             className="px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition shadow-sm flex items-center gap-1.5"
@@ -370,6 +534,7 @@ export default function CalendarView({
 
           const dateKey = `${year}-${String(month + 1).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`;
           const isToday = isThisMonth && today.getDate() === dayNum;
+          const isPendingDay = pendingDates.includes(dateKey);
 
           // Statuts de l'utilisateur connecté
           const userDay = presencesMap[dateKey]?.[currentUser.id] || {
@@ -385,20 +550,29 @@ export default function CalendarView({
             <div
               key={dateKey}
               className={`bg-[var(--card-bg)] rounded-xl min-h-[145px] p-2 border flex flex-col gap-1.5 shadow-sm transition ${
-                isToday
+                isPendingDay
+                  ? "border-amber-400 ring-2 ring-amber-300/50 bg-amber-50/20"
+                  : isToday
                   ? "border-[var(--primary)] ring-2 ring-[var(--primary)]/20"
                   : "border-[var(--border)] hover:border-gray-300"
               }`}
             >
               {/* En-tête de la cellule */}
               <div className="flex justify-between items-center">
-                <span
-                  className={`text-xs sm:text-sm font-bold ${
-                    isToday ? "text-[var(--primary)]" : "text-[var(--text)]"
-                  }`}
-                >
-                  {dayNum}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className={`text-xs sm:text-sm font-bold ${
+                      isToday ? "text-[var(--primary)]" : "text-[var(--text)]"
+                    }`}
+                  >
+                    {dayNum}
+                  </span>
+                  {isPendingDay && (
+                    <span className="text-[9px] uppercase font-bold text-amber-800 bg-amber-100 border border-amber-200 px-1 py-0.2 rounded leading-tight">
+                      Modifié
+                    </span>
+                  )}
+                </div>
                 {isToday && (
                   <span className="text-[10px] uppercase font-bold text-[var(--primary)] bg-blue-50 px-1 rounded">
                     Auj.
