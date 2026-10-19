@@ -192,7 +192,7 @@ export default function AdminPanel({
         } else {
           showNotification(
             undefined,
-            `L'invitation a été créée, mais le courriel n'a pas pu être délivré (${res.data.emailError}). Vous pouvez copier le lien ci-dessous et le transmettre directement au destinataire.`
+            `L'invitation a été créée, mais le courriel n'a pas pu être délivré (${res.data.emailError || "Erreur de distribution"}). Vous pouvez copier le lien ci-dessous et le transmettre directement au destinataire.`
           );
         }
         form.reset();

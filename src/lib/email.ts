@@ -51,34 +51,93 @@ async function sendViaResend({
   }
 
   try {
-    const fromEmail = process.env.EMAIL_FROM || "onboarding@resend.dev";
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${resendApiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: `Présence Bureau <${fromEmail}>`,
-        to: [to],
-        subject,
-        text: textContent,
-        ...(htmlContent ? { html: htmlContent } : {}),
-      }),
+    const fromEmail = process.env.EMAIL_FROM || "notifications@presence-bureau.fyi";
+    const sender = fromEmail.includes("<")
+      ? fromEmail
+      : `Présence Bureau <${fromEmail}>`;
+
+    const payload = JSON.stringify({
+      from: sender,
+      to: [to],
+      subject,
+      text: textContent,
+      ...(htmlContent ? { html: htmlContent } : {}),
     });
 
-    if (res.ok) {
-      const data = await res.json();
+    let resStatus: number;
+    let resOk: boolean;
+    let resBodyText: string;
+
+    try {
+      const res = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${resendApiKey}`,
+          "Content-Type": "application/json",
+          "User-Agent": "PresenceBureau/1.0",
+        },
+        body: payload,
+      });
+      resStatus = res.status;
+      resOk = res.ok;
+      resBodyText = await res.text();
+    } catch {
+      // Repli via node:https en cas de timeout IPv6 ou souci undici
+      const https = await import("node:https");
+      const fallbackRes = await new Promise<{ ok: boolean; status: number; text: string }>((resolve, reject) => {
+        const req = https.request("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${resendApiKey}`,
+            "Content-Type": "application/json",
+            "Content-Length": Buffer.byteLength(payload),
+            "User-Agent": "PresenceBureau/1.0",
+          },
+        }, (response) => {
+          let data = "";
+          response.on("data", chunk => data += chunk);
+          response.on("end", () => {
+            resolve({
+              ok: (response.statusCode || 500) >= 200 && (response.statusCode || 500) < 300,
+              status: response.statusCode || 500,
+              text: data,
+            });
+          });
+        });
+        req.on("error", reject);
+        req.write(payload);
+        req.end();
+      });
+      resStatus = fallbackRes.status;
+      resOk = fallbackRes.ok;
+      resBodyText = fallbackRes.text;
+    }
+
+    if (resOk) {
+      let data: { id?: string } = {};
+      try {
+        data = JSON.parse(resBodyText);
+      } catch {}
       return { success: true, simulated: false, messageId: data.id };
     }
 
-    const errorDetails = await res.text();
+    const errorDetails = resBodyText;
+    let parsedMessage = errorDetails;
+    try {
+      const parsed = JSON.parse(errorDetails);
+      if (parsed.message) {
+        parsedMessage = parsed.message;
+      }
+    } catch {
+      // conserver errorDetails
+    }
+
     console.error(
-      `[Email Resend Error] Échec d'envoi vers "${to}" (HTTP ${res.status}) :`,
-      errorDetails
+      `[Email Resend Error] Échec d'envoi vers "${to}" (HTTP ${resStatus}) :`,
+      parsedMessage
     );
 
-    let friendlyError = `Échec d'envoi Resend (HTTP ${res.status})`;
+    let friendlyError = `Échec d'envoi Resend (HTTP ${resStatus})`;
     try {
       const parsed = JSON.parse(errorDetails);
       if (parsed.message) {
@@ -90,6 +149,12 @@ async function sendViaResend({
       }
     } catch {
       if (errorDetails) friendlyError += ` : ${errorDetails}`;
+    }
+
+    if (resStatus === 403 && (fromEmail.includes("resend.dev") || !process.env.EMAIL_FROM)) {
+      console.warn(
+        `[Email Resend Astuce] Vous utilisez l'adresse par défaut (${fromEmail}). Resend autorise uniquement l'envoi vers l'adresse propriétaire de votre compte. Pour envoyer à tous vos collègues, ajoutez et validez votre domaine sur https://resend.com/domains et configurez EMAIL_FROM.`
+      );
     }
 
     return {

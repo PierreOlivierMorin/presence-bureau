@@ -53,7 +53,7 @@ export async function getAppBaseUrl(): Promise<string> {
 
   // 4. Repli de sécurité garanti pour la production
   if (process.env.NODE_ENV === "production" || process.env.VERCEL === "1") {
-    return "https://presence-bureau.vercel.app";
+    return "https://presence-bureau.fyi";
   }
 
   // 5. Environnement local de développement / test

@@ -394,6 +394,12 @@ export async function resendInvitationAction(invitationId: string): Promise<Acti
       details: `Renvoi de l'invitation pour l'équipe ${invitation.team.name}`,
     });
 
+    if (!emailRes.success && !emailRes.simulated) {
+      return {
+        error: emailRes.error || "Échec de l'envoi du courriel via Resend.",
+      };
+    }
+
     revalidatePath("/admin");
     return { success: true };
   } catch (e: unknown) {

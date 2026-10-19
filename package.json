@@ -15,7 +15,8 @@
     "db:use:postgres": "node scripts/ensure-db-provider.js postgresql && prisma generate",
     "db:push": "prisma db push",
     "db:seed": "tsx --env-file=.env prisma/seed.ts",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "email:test": "node --env-file=.env scripts/test-email.mjs"
   },
   "prisma": {
     "seed": "tsx --env-file=.env prisma/seed.ts"
