@@ -68,10 +68,22 @@ export async function subscribeToPushNotifications(): Promise<{
     return { success: false, error: "Les notifications ne sont pas supportées par ce navigateur." };
   }
 
-  const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-  if (!vapidPublicKey) {
-    return { success: false, error: "Clé VAPID publique manquante sur le serveur." };
-  }
+    let vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+    if (!vapidPublicKey) {
+      try {
+        const keyRes = await fetch("/api/push/vapid-public-key");
+        if (keyRes.ok) {
+          const keyData = await keyRes.json();
+          vapidPublicKey = keyData.publicKey;
+        }
+      } catch (err) {
+        console.error("[Push] Erreur récupération clé publique VAPID:", err);
+      }
+    }
+
+    if (!vapidPublicKey) {
+      return { success: false, error: "Clé VAPID publique manquante sur le serveur." };
+    }
 
   try {
     const permission = await Notification.requestPermission();
