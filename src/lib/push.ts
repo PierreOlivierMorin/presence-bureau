@@ -50,7 +50,12 @@ export async function sendNotificationToSubscription(
         body: payload.body,
         url: payload.url || "/",
         tag: payload.tag || "presence-update",
-      })
+      }),
+      {
+        TTL: 86400, // 24h : le message n'est pas perdu si le téléphone est temporairement hors réseau
+        urgency: "high", // 'high' force Apple (APNs) et Google (FCM) à réveiller le téléphone et afficher la notification même si l'app est fermée
+        topic: (payload.tag || "presence").replace(/[^a-zA-Z0-9-_~]/g, "").slice(0, 32),
+      }
     );
     return true;
   } catch (err: unknown) {

@@ -1,4 +1,4 @@
-const CACHE_NAME = "presence-bureau-v2";
+const CACHE_NAME = "presence-bureau-v3";
 const STATIC_ASSETS = [
   "/manifest.json",
   "/icons/icon.svg",
@@ -88,8 +88,9 @@ self.addEventListener("push", (event) => {
     data: {
       url: data.url || "/",
     },
-    vibrate: [150, 50, 150],
+    vibrate: [200, 100, 200],
     tag: data.tag || "presence-notification",
+    renotify: true,
   };
 
   event.waitUntil(self.registration.showNotification(title, options));
