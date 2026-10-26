@@ -2,6 +2,7 @@ import { requireAuth } from "@/lib/auth";
 import { prisma, ensurePresenceDinerColumn } from "@/lib/db";
 import Navbar from "@/components/Navbar";
 import CalendarView from "@/components/Calendar/CalendarView";
+import DailyPushReminder from "@/components/PWA/DailyPushReminder";
 import Link from "next/link";
 import { Shield, Users, AlertCircle } from "lucide-react";
 
@@ -98,6 +99,8 @@ export default async function HomePage() {
           <div className="hidden md:block">
             <Navbar user={session} activeTeamName={activeTeam?.name} />
           </div>
+
+          <DailyPushReminder />
 
           {!activeTeamId ? (
             <div className="bg-[var(--card-bg)] border border-yellow-200 rounded-2xl p-8 text-center max-w-lg mx-auto shadow-sm mt-8">

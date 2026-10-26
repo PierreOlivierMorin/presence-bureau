@@ -76,6 +76,13 @@ export default async function AdminPage() {
       ? await prisma.team.findUnique({ where: { id: session.teamId } })
       : null;
 
+    const totalPushSubscriptions = await prisma.pushSubscription.count();
+    const uniquePushUsers = (
+      await prisma.pushSubscription.groupBy({
+        by: ["userId"],
+      })
+    ).length;
+
     return (
       <div className="min-h-screen p-4 sm:p-6 lg:p-8 bg-[var(--bg)]">
         <div className="max-w-[1240px] mx-auto">
@@ -83,6 +90,10 @@ export default async function AdminPage() {
           <AdminPanel
             currentUserId={session.id}
             initialTeams={teams}
+            initialPushStats={{
+              totalSubscriptions: totalPushSubscriptions,
+              uniqueUsers: uniquePushUsers,
+            }}
             initialUsers={users.map((u) => ({
               ...u,
               createdAt: u.createdAt ? u.createdAt.toISOString() : undefined,

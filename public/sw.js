@@ -1,4 +1,4 @@
-const CACHE_NAME = "presence-bureau-v1";
+const CACHE_NAME = "presence-bureau-v2";
 const STATIC_ASSETS = [
   "/manifest.json",
   "/icons/icon.svg",
@@ -63,6 +63,52 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     fetch(request).catch(() => {
       return caches.match(request);
+    })
+  );
+});
+
+// ==========================================
+// PUSH NOTIFICATIONS
+// ==========================================
+self.addEventListener("push", (event) => {
+  let data = {};
+  if (event.data) {
+    try {
+      data = event.data.json();
+    } catch {
+      data = { title: "Présence Bureau", body: event.data.text() };
+    }
+  }
+
+  const title = data.title || "Présence Bureau";
+  const options = {
+    body: data.body || "",
+    icon: data.icon || "/icons/icon-192.png",
+    badge: data.badge || "/icons/icon-192.png",
+    data: {
+      url: data.url || "/",
+    },
+    vibrate: [150, 50, 150],
+    tag: data.tag || "presence-notification",
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = event.notification.data?.url || "/";
+
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {
+      for (const client of windowClients) {
+        if ("focus" in client) {
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow(targetUrl);
+      }
     })
   );
 });

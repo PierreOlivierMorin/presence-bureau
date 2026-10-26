@@ -5,6 +5,7 @@ import { logoutAction } from "@/lib/actions/auth";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LogOut, Shield, Calendar, Users } from "lucide-react";
+import NotificationSettingsButton from "@/components/PWA/NotificationSettingsButton";
 
 interface NavbarProps {
   user: SessionUser;
@@ -43,6 +44,7 @@ export default function Navbar({ user, activeTeamName }: NavbarProps) {
         </div>
 
         <div className="flex items-center gap-2">
+          <NotificationSettingsButton />
           {isAdmin && (
             isOnAdmin ? (
               <Link

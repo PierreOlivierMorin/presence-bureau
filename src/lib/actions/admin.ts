@@ -7,6 +7,7 @@ import { revalidatePath } from "next/cache";
 import { createAuditLog } from "@/lib/audit";
 import { sendInvitationEmail } from "@/lib/email";
 import { getAppBaseUrl } from "@/lib/url";
+import { sendPushToUser, sendPushToAllUsers } from "@/lib/push";
 
 export type ActionResult<T = unknown> = {
   success?: boolean;
@@ -405,6 +406,61 @@ export async function resendInvitationAction(invitationId: string): Promise<Acti
   } catch (e: unknown) {
     return {
       error: e instanceof Error ? e.message : "Erreur lors du renvoi de l'invitation.",
+    };
+  }
+}
+
+export async function sendAdminPushNotificationAction(data: {
+  target: "all" | "self";
+  title: string;
+  body: string;
+  url?: string;
+}): Promise<ActionResult<{ sent: number; total: number }>> {
+  try {
+    const admin = await checkAdminSession();
+
+    const title = data.title?.trim();
+    const body = data.body?.trim();
+    const url = data.url?.trim() || "/";
+
+    if (!title || !body) {
+      return { error: "Le titre et le message de la notification sont obligatoires." };
+    }
+
+    let result = { sent: 0, total: 0 };
+
+    if (data.target === "self") {
+      result = await sendPushToUser(admin.id, {
+        title,
+        body,
+        url,
+        tag: "admin-test-push",
+      });
+    } else {
+      result = await sendPushToAllUsers({
+        title,
+        body,
+        url,
+        tag: "admin-broadcast-push",
+      });
+    }
+
+    await createAuditLog({
+      action: "PUSH_NOTIFICATION_SENT",
+      actorId: admin.id,
+      target: data.target === "all" ? "TOUS_UTILISATEURS" : `ADMIN_${admin.id}`,
+      details: `Envoi push (${data.target === "all" ? "Général" : "Test personnel"}) : "${title}" (${result.sent}/${result.total} envoyés)`,
+    });
+
+    revalidatePath("/admin");
+    return {
+      success: true,
+      data: result,
+    };
+  } catch (e: unknown) {
+    console.error("[sendAdminPushNotificationAction] Erreur:", e);
+    return {
+      error: e instanceof Error ? e.message : "Erreur lors de l'envoi de la notification push.",
     };
   }
 }

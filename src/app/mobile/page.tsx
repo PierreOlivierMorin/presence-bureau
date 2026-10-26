@@ -1,6 +1,7 @@
 import { requireAuth } from "@/lib/auth";
 import { prisma, ensurePresenceDinerColumn } from "@/lib/db";
 import MobileReservationView from "@/components/Calendar/MobileReservationView";
+import DailyPushReminder from "@/components/PWA/DailyPushReminder";
 import Link from "next/link";
 import { Users, Shield } from "lucide-react";
 
@@ -110,7 +111,8 @@ export default async function MobilePage() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--bg)]">
+    <div className="min-h-screen bg-[var(--bg)] p-2">
+      <DailyPushReminder />
       <MobileReservationView
         currentUser={session}
         initialYear={year}

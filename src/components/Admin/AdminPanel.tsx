@@ -10,6 +10,7 @@ import {
   createInvitationAction,
   revokeInvitationAction,
   resendInvitationAction,
+  sendAdminPushNotificationAction,
 } from "@/lib/actions/admin";
 import {
   Users,
@@ -28,6 +29,10 @@ import {
   Clock,
   CheckCircle2,
   AlertCircle,
+  Bell,
+  BellRing,
+  Sparkles,
+  X,
 } from "lucide-react";
 
 interface TeamItem {
@@ -76,6 +81,10 @@ interface AdminPanelProps {
   initialUsers: UserItem[];
   initialInvitations?: InvitationItem[];
   initialAuditLogs?: AuditLogItem[];
+  initialPushStats?: {
+    totalSubscriptions: number;
+    uniqueUsers: number;
+  };
 }
 
 export default function AdminPanel({
@@ -84,6 +93,7 @@ export default function AdminPanel({
   initialUsers,
   initialInvitations = [],
   initialAuditLogs = [],
+  initialPushStats = { totalSubscriptions: 0, uniqueUsers: 0 },
 }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<"teams" | "invitations" | "users" | "audit">("invitations");
   const [teams, setTeams] = useState<TeamItem[]>(initialTeams);
@@ -96,6 +106,67 @@ export default function AdminPanel({
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [copiedTokenId, setCopiedTokenId] = useState<string | null>(null);
   const [lastCreatedInvite, setLastCreatedInvite] = useState<{ url: string; email: string } | null>(null);
+
+  // Notifications push (modal d'envoi & test admin)
+  const [showBroadcastModal, setShowBroadcastModal] = useState(false);
+  const [pushTarget, setPushTarget] = useState<"all" | "self">("all");
+  const [pushTitle, setPushTitle] = useState("Présence Bureau");
+  const [pushBody, setPushBody] = useState("");
+  const [pushUrl, setPushUrl] = useState("/");
+  const [isSendingPush, setIsSendingPush] = useState(false);
+  const [pushResult, setPushResult] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  const handleSendPush = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pushTitle.trim() || !pushBody.trim()) {
+      setPushResult({ type: "error", message: "Le titre et le message sont requis." });
+      return;
+    }
+
+    setIsSendingPush(true);
+    setPushResult(null);
+
+    const res = await sendAdminPushNotificationAction({
+      target: pushTarget,
+      title: pushTitle,
+      body: pushBody,
+      url: pushUrl,
+    });
+
+    setIsSendingPush(false);
+
+    if (res.error) {
+      setPushResult({ type: "error", message: res.error });
+    } else if (res.data) {
+      setPushResult({
+        type: "success",
+        message:
+          pushTarget === "self"
+            ? `Notification de test envoyée (${res.data.sent}/${res.data.total} appareil).`
+            : `Notification envoyée à tous les abonnés (${res.data.sent}/${res.data.total} appareils touchés).`,
+      });
+      if (pushTarget === "all") {
+        setPushBody("");
+      }
+    }
+  };
+
+  const applyPushPreset = (preset: "general" | "presence" | "monday") => {
+    setPushResult(null);
+    if (preset === "general") {
+      setPushTitle("📢 Annonce Présence Bureau");
+      setPushBody("Bonjour à tous ! Merci de penser à vérifier et renseigner vos présences de la semaine.");
+      setPushUrl("/");
+    } else if (preset === "presence") {
+      setPushTitle("🏢 Présence au bureau aujourd'hui");
+      setPushBody("Plusieurs collègues sont au bureau aujourd'hui ! Consultez le planning en direct.");
+      setPushUrl("/");
+    } else if (preset === "monday") {
+      setPushTitle("📅 Planning de la semaine");
+      setPushBody("C'est lundi ! N'oubliez pas d'indiquer vos jours de présence au bureau pour cette semaine.");
+      setPushUrl("/");
+    }
+  };
 
   const showNotification = (success?: string, error?: string) => {
     if (error) {
@@ -320,6 +391,8 @@ export default function AdminPanel({
         return <span className="text-amber-700 bg-amber-50 px-2 py-0.5 rounded font-medium border border-amber-200">Demande mdp</span>;
       case "PASSWORD_RESET_COMPLETED":
         return <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-medium border border-emerald-200">Mdp réinitialisé</span>;
+      case "PUSH_NOTIFICATION_SENT":
+        return <span className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded font-medium border border-blue-200">Push envoyé</span>;
       default:
         return <span className="text-gray-600 bg-gray-50 px-2 py-0.5 rounded font-medium">{action}</span>;
     }
@@ -341,69 +414,91 @@ export default function AdminPanel({
         </div>
       )}
 
-      {/* Barre d'onglets de gestion */}
-      <div className="flex border-b border-[var(--border)] overflow-x-auto gap-2 pb-px">
-        <button
-          type="button"
-          onClick={() => setActiveTab("invitations")}
-          className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold border-b-2 transition whitespace-nowrap ${
-            activeTab === "invitations"
-              ? "border-[var(--primary)] text-[var(--primary)] bg-white/50"
-              : "border-transparent text-[var(--muted)] hover:text-[var(--text)]"
-          }`}
-        >
-          <Mail className="w-4 h-4" />
-          <span>Invitations d&apos;équipes</span>
-          <span className="ml-1 text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-bold">
-            {invitations.length}
-          </span>
-        </button>
+      {/* Barre d'onglets de gestion & Bouton notification push */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border)] pb-2 sm:pb-0">
+        <div className="flex border-b sm:border-b-0 border-[var(--border)] overflow-x-auto gap-2 pb-px">
+          <button
+            type="button"
+            onClick={() => setActiveTab("invitations")}
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold border-b-2 transition whitespace-nowrap ${
+              activeTab === "invitations"
+                ? "border-[var(--primary)] text-[var(--primary)] bg-white/50"
+                : "border-transparent text-[var(--muted)] hover:text-[var(--text)]"
+            }`}
+          >
+            <Mail className="w-4 h-4" />
+            <span>Invitations d&apos;équipes</span>
+            <span className="ml-1 text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-bold">
+              {invitations.length}
+            </span>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab("users")}
-          className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold border-b-2 transition whitespace-nowrap ${
-            activeTab === "users"
-              ? "border-[var(--primary)] text-[var(--primary)] bg-white/50"
-              : "border-transparent text-[var(--muted)] hover:text-[var(--text)]"
-          }`}
-        >
-          <Shield className="w-4 h-4" />
-          <span>Utilisateurs & Rôles</span>
-          <span className="ml-1 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-800 font-bold">
-            {users.length}
-          </span>
-        </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("users")}
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold border-b-2 transition whitespace-nowrap ${
+              activeTab === "users"
+                ? "border-[var(--primary)] text-[var(--primary)] bg-white/50"
+                : "border-transparent text-[var(--muted)] hover:text-[var(--text)]"
+            }`}
+          >
+            <Shield className="w-4 h-4" />
+            <span>Utilisateurs & Rôles</span>
+            <span className="ml-1 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-800 font-bold">
+              {users.length}
+            </span>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab("teams")}
-          className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold border-b-2 transition whitespace-nowrap ${
-            activeTab === "teams"
-              ? "border-[var(--primary)] text-[var(--primary)] bg-white/50"
-              : "border-transparent text-[var(--muted)] hover:text-[var(--text)]"
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span>Gestion des Équipes</span>
-          <span className="ml-1 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-800 font-bold">
-            {teams.length}
-          </span>
-        </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("teams")}
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold border-b-2 transition whitespace-nowrap ${
+              activeTab === "teams"
+                ? "border-[var(--primary)] text-[var(--primary)] bg-white/50"
+                : "border-transparent text-[var(--muted)] hover:text-[var(--text)]"
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>Gestion des Équipes</span>
+            <span className="ml-1 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-800 font-bold">
+              {teams.length}
+            </span>
+          </button>
 
+          <button
+            type="button"
+            onClick={() => setActiveTab("audit")}
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold border-b-2 transition whitespace-nowrap ${
+              activeTab === "audit"
+                ? "border-[var(--primary)] text-[var(--primary)] bg-white/50"
+                : "border-transparent text-[var(--muted)] hover:text-[var(--text)]"
+            }`}
+          >
+            <History className="w-4 h-4" />
+            <span>Journal d&apos;audit & Sécurité</span>
+            <span className="ml-1 text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">
+              {auditLogs.length}
+            </span>
+          </button>
+        </div>
+
+        {/* Bouton d'action Admin pour envoyer des notifications push */}
         <button
           type="button"
-          onClick={() => setActiveTab("audit")}
-          className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold border-b-2 transition whitespace-nowrap ${
-            activeTab === "audit"
-              ? "border-[var(--primary)] text-[var(--primary)] bg-white/50"
-              : "border-transparent text-[var(--muted)] hover:text-[var(--text)]"
-          }`}
+          onClick={() => {
+            setShowBroadcastModal(true);
+            setPushResult(null);
+          }}
+          className="self-start sm:self-center shrink-0 flex items-center gap-2 px-3.5 py-2 mb-2 sm:mb-0 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition active:scale-95"
+          title="Tester ou envoyer une notification à tous les utilisateurs"
         >
-          <History className="w-4 h-4" />
-          <span>Journal d&apos;audit & Sécurité</span>
-          <span className="ml-1 text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">
-            {auditLogs.length}
+          <Bell className="w-4 h-4" />
+          <span>Envoyer notification</span>
+          <span
+            className="px-1.5 py-0.5 rounded-full bg-white/20 text-[10px] font-semibold"
+            title={`${initialPushStats.totalSubscriptions} appareil(s) enregistré(s)`}
+          >
+            {initialPushStats.uniqueUsers} {initialPushStats.uniqueUsers > 1 ? "abonnés" : "abonné"}
           </span>
         </button>
       </div>
@@ -864,6 +959,197 @@ export default function AdminPanel({
             </table>
           </div>
         </section>
+      )}
+
+      {/* Modal d'envoi et de test de notification Push */}
+      {showBroadcastModal && (
+        <div
+          onClick={() => setShowBroadcastModal(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-[var(--card-bg)] border border-[var(--border)] text-[var(--text)] rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto"
+          >
+            {/* Header modal */}
+            <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                  <Bell className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base leading-tight">Envoyer une notification push</h3>
+                  <p className="text-[11px] text-[var(--muted)]">
+                    {initialPushStats.uniqueUsers} {initialPushStats.uniqueUsers > 1 ? "utilisateurs abonnés" : "utilisateur abonné"} ({initialPushStats.totalSubscriptions} appareil{initialPushStats.totalSubscriptions > 1 ? "s" : ""})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBroadcastModal(false)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Presets rapides */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-gray-700 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>Modèles de messages rapides :</span>
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => applyPushPreset("general")}
+                  className="px-2.5 py-1 text-xs rounded-lg border border-[var(--border)] hover:bg-gray-50 text-gray-700 transition"
+                >
+                  📢 Annonce générale
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyPushPreset("presence")}
+                  className="px-2.5 py-1 text-xs rounded-lg border border-[var(--border)] hover:bg-gray-50 text-gray-700 transition"
+                >
+                  🏢 Présence bureau
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyPushPreset("monday")}
+                  className="px-2.5 py-1 text-xs rounded-lg border border-[var(--border)] hover:bg-gray-50 text-gray-700 transition"
+                >
+                  📅 Rappel du lundi
+                </button>
+              </div>
+            </div>
+
+            <form onSubmit={handleSendPush} className="space-y-3.5">
+              {/* Choix des destinataires */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-gray-700">Destinataires :</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <label
+                    className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer text-xs transition ${
+                      pushTarget === "all"
+                        ? "border-blue-500 bg-blue-50/50 text-blue-900 font-semibold"
+                        : "border-[var(--border)] hover:bg-gray-50 text-gray-700"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="pushTarget"
+                      value="all"
+                      checked={pushTarget === "all"}
+                      onChange={() => setPushTarget("all")}
+                      className="text-blue-600"
+                    />
+                    <span>Tous les abonnés ({initialPushStats.uniqueUsers})</span>
+                  </label>
+
+                  <label
+                    className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer text-xs transition ${
+                      pushTarget === "self"
+                        ? "border-blue-500 bg-blue-50/50 text-blue-900 font-semibold"
+                        : "border-[var(--border)] hover:bg-gray-50 text-gray-700"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="pushTarget"
+                      value="self"
+                      checked={pushTarget === "self"}
+                      onChange={() => setPushTarget("self")}
+                      className="text-blue-600"
+                    />
+                    <span>Moi uniquement (Test)</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Titre */}
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-gray-700">Titre de la notification :</label>
+                <input
+                  type="text"
+                  value={pushTitle}
+                  onChange={(e) => setPushTitle(e.target.value)}
+                  placeholder="Ex: Présence Bureau"
+                  required
+                  className="w-full px-3 py-2 text-xs border border-[var(--border)] rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Message */}
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-gray-700">Contenu du message :</label>
+                <textarea
+                  value={pushBody}
+                  onChange={(e) => setPushBody(e.target.value)}
+                  placeholder="Ex: N'oubliez pas d'indiquer vos présences de la semaine !"
+                  rows={3}
+                  required
+                  className="w-full px-3 py-2 text-xs border border-[var(--border)] rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* URL au clic */}
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-gray-700">Lien lors du clic (optionnel) :</label>
+                <input
+                  type="text"
+                  value={pushUrl}
+                  onChange={(e) => setPushUrl(e.target.value)}
+                  placeholder="/"
+                  className="w-full px-3 py-2 text-xs border border-[var(--border)] rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                />
+              </div>
+
+              {/* Résultat de l'envoi */}
+              {pushResult && (
+                <div
+                  className={`p-3 rounded-xl text-xs flex items-center gap-2 border ${
+                    pushResult.type === "success"
+                      ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                      : "bg-rose-50 text-rose-800 border-rose-200"
+                  }`}
+                >
+                  {pushResult.type === "success" ? (
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                  )}
+                  <span>{pushResult.message}</span>
+                </div>
+              )}
+
+              {/* Boutons d'action */}
+              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-[var(--border)]">
+                <button
+                  type="button"
+                  onClick={() => setShowBroadcastModal(false)}
+                  className="px-3.5 py-2 text-xs text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-xl transition"
+                >
+                  Fermer
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSendingPush || !pushTitle.trim() || !pushBody.trim()}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition active:scale-95 disabled:opacity-50"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>
+                    {isSendingPush
+                      ? "Envoi en cours..."
+                      : pushTarget === "self"
+                      ? "Tester sur mon appareil"
+                      : "Diffuser à tous les abonnés"}
+                  </span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -31,6 +31,7 @@ import {
   RotateCw,
 } from "lucide-react";
 import InstallPwaPrompt from "@/components/PWA/InstallPwaPrompt";
+import NotificationSettingsButton from "@/components/PWA/NotificationSettingsButton";
 
 export type StatusType = "NONE" | "OFFICE" | "REMOTE" | "ABSENT";
 const STATUS_CYCLE: StatusType[] = ["NONE", "OFFICE", "REMOTE", "ABSENT"];
@@ -1865,6 +1866,17 @@ export default function MobileReservationView({
               <Download className="w-4 h-4" />
               <span>Voir comment installer l&apos;app</span>
             </button>
+          </div>
+
+          {/* Notifications Push */}
+          <div className="bg-[var(--card-bg)] p-3.5 rounded-2xl border border-[var(--border)] shadow-xs flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-xs font-bold text-gray-900">Notifications Push</h3>
+              <p className="text-[11px] text-gray-500">
+                Récapitulatif matinal & rappel du lundi
+              </p>
+            </div>
+            <NotificationSettingsButton />
           </div>
 
           {/* Admin Team Switcher */}

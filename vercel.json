@@ -1,5 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "buildCommand": "node scripts/ensure-db-provider.js && prisma generate && (prisma db push --skip-generate || true) && next build"
+  "buildCommand": "node scripts/ensure-db-provider.js && prisma generate && (prisma db push --skip-generate || true) && next build",
+  "crons": [
+    {
+      "path": "/api/cron/notifications",
+      "schedule": "0 12 * * 1-5"
+    }
+  ]
 }
